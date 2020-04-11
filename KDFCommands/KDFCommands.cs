@@ -83,25 +83,21 @@ public class KDFCommands : IBotPlugin {
 		}
 	}
 
-	private string GetClientNameFormUid(Uid id) {
+	private string GetClientNameFromUid(Uid id) {
 		return ts3FullClient.GetClientNameFromUid(id).Value.Name;
 	}
 
-	private string GetInvokerName(InvokerData invoker) {
-		return GetClientNameFormUid(invoker.ClientUid);
-	}
-	
 	private string GetTitleAtIndex(IReadOnlyPlaylist queue, int index) {
 		return queue[index].AudioResource.ResourceTitle;
 	}
 
 	private string GetNameAtIndex(IReadOnlyPlaylist queue, int index) {
-		return GetClientNameFormUid(queue[index].Meta.ResourceOwnerUid);
+		return GetClientNameFromUid(queue[index].Meta.ResourceOwnerUid);
 	}
 
 	private void Start(object sender, PlayInfoEventArgs e) {
 		title = e.ResourceData.ResourceTitle;
-		username = GetInvokerName(e.Invoker);
+		username = GetClientNameFromUid(e.PlayResource.Meta.ResourceOwnerUid);
 	}
 	
 	private void Stop(object sender, SongEndEventArgs e) { }
@@ -234,8 +230,8 @@ public class KDFCommands : IBotPlugin {
 	}
 
 	public void Dispose() {
-		playManager.AfterResourceStarted += Start;
-		playManager.ResourceStopped += Stop;
+		playManager.AfterResourceStarted -= Start;
+		playManager.ResourceStopped -= Stop;
 	
 		running = false;
 		descThread.Join();
