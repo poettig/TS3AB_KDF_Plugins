@@ -188,8 +188,9 @@ public class KDFCommands : IBotPlugin {
 	private string CommandQueueInternal(InvokerData invoker, bool printAll) {
 		IReadOnlyPlaylist queue = playlistManager.CurrentList;
 
-		if (queue.Items.Count == 0)
+		if (queue.Items.Count == 0) {
 			return "There is nothing on right now...";
+		}
 	
 		string output = "";
 		if (playManager.IsPlaying) {

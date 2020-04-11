@@ -26,6 +26,12 @@ echo "---------------------------------------------------"
 
 for plugin in */; do
 	plugin=${plugin%/}
+
+	# Skip the bot repository
+	if [ "$plugin" == "TS3AudioBot" ]; then
+		continue
+	fi
+
 	echo -e "\033[1;33mBuilding plugin $plugin...\033[0m"
 
 	cd "$plugin" || error "Failed to cd into plugin folder '$plugin'"
