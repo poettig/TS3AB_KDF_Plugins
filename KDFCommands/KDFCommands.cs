@@ -13,6 +13,7 @@ using TS3AudioBot.Playlists;
 using TS3AudioBot.ResourceFactories;
 using TS3AudioBot.Helper;
 using TS3AudioBot.Rights;
+using TS3AudioBot.Sessions;
 using TSLib;
 using TSLib.Full;
 using TSLib.Helper;
@@ -223,7 +224,14 @@ public class KDFCommands : IBotPlugin {
 			return "There is not song currently playing.";
 		}
 	}
-	
+
+	[Command("search list add")]
+	public static string CommandSearchAdd(ExecutionInformation info, PlaylistManager playlistManager, UserSession session, string listId, int index) {
+		AudioResource res = session.GetSearchResult(index);
+		MainCommands.ListAddItem(playlistManager, info, listId, res);
+		return "Ok";
+	}
+
 	public void Dispose() {
 		playManager.AfterResourceStarted += Start;
 		playManager.ResourceStopped += Stop;
