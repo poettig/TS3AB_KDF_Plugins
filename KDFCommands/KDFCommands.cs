@@ -88,34 +88,34 @@ public class KDFCommands : IBotPlugin {
     private void Stop(object sender, SongEndEventArgs e) {
     }
 
-    public static void Shuffle<T>(this IList<T> list, Random rng)
-    {
-       int n = list.Count;
-       while (n > 1)
-       {
-          n--;
-          int k = rng.Next(n + 1);
-          T value = list[k];
-          list[k] = list[n];
-          list[n] = value;
-       }
-    }
+	public static void Shuffle<T>(this IList<T> list, Random rng)
+	{
+	   int n = list.Count;
+	   while (n > 1)
+	   {
+		  n--;
+		  int k = rng.Next(n + 1);
+		  T value = list[k];
+		  list[k] = list[n];
+		  list[n] = value;
+	   }
+	}
 
-    [Command("list rqueue")]
-    public static void CommandListRQueue(PlaylistManager playlistManager, PlayManager playManager, InvokerData invoker, string listId, int? countOpt = null)
-    {
-       var plist = playlistManager.LoadPlaylist(listId).UnwrapThrow();
-       var items = new List<PlaylistItem>(plist.Items);
+	[Command("list rqueue")]
+	public static void CommandListRQueue(PlaylistManager playlistManager, PlayManager playManager, InvokerData invoker, string listId, int? countOpt = null)
+	{
+	   var plist = playlistManager.LoadPlaylist(listId).UnwrapThrow();
+	   var items = new List<PlaylistItem>(plist.Items);
 
-       int count = countOpt.HasValue ? Tools.Clamp(countOpt.Value, 0, items.Count) : items.Count;
+	   int count = countOpt.HasValue ? Tools.Clamp(countOpt.Value, 0, items.Count) : items.Count;
 
-       items.Shuffle(new Random());
-       playManager.Enqueue(invoker, items.Take(count)).UnwrapThrow();
-    }
+	   items.Shuffle(new Random());
+	   playManager.Enqueue(invoker, items.Take(count)).UnwrapThrow();
+	}
 
-   // You should prefer static methods which get the modules injected via parameter unless
-   // you actually need objects from your plugin in your method.
-   [Command("youtube")]
+    // You should prefer static methods which get the modules injected via parameter unless
+    // you actually need objects from your plugin in your method.
+    [Command("youtube")]
     public void CommandYoutube(ResolveContext resolver, InvokerData invoker, ClientCall cc, string message) {
         string[] parts = Regex.Split(message, ";+");
         ts3Client.SendMessage("Received your request to add " + parts.Length + " songs, processing...", cc.ClientId.Value);
