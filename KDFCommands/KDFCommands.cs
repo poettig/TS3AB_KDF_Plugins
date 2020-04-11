@@ -88,8 +88,7 @@ public class KDFCommands : IBotPlugin {
     private void Stop(object sender, SongEndEventArgs e) {
     }
 
-	public static void Shuffle<T>(this IList<T> list, Random rng)
-	{
+	public static void Shuffle<T>(IList<T> list, Random rng) {
 	   int n = list.Count;
 	   while (n > 1)
 	   {
@@ -109,7 +108,7 @@ public class KDFCommands : IBotPlugin {
 
 	   int count = countOpt.HasValue ? Tools.Clamp(countOpt.Value, 0, items.Count) : items.Count;
 
-	   items.Shuffle(new Random());
+		Shuffle(items, new Random());
 	   playManager.Enqueue(invoker, items.Take(count)).UnwrapThrow();
 	}
 
