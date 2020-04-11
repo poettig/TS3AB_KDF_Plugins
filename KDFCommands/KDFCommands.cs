@@ -23,12 +23,16 @@ public class KDFCommands : IBotPlugin {
 	internal class CommandsBag : ICommandBag {
 		public IReadOnlyCollection<BotCommand> BagCommands { get; } = ImmutableList<BotCommand>.Empty;
 
-		public IReadOnlyCollection<string> AdditionalRights { get; } = new []{ RightOverrideQueueCommandCheck };
+		public IReadOnlyCollection<string> AdditionalRights { get; } = new []{ RightOverrideQueueCommandCheck, RightDeleteOther, RightSkipOther };
 	}
 	
 	private const string YOUTUBE_URL_REGEX =
 		"^(?:https?:\\/\\/)(?:www\\.)?(?:youtube\\.com\\/watch\\?v=(.*?)(?:&.*)*|youtu\\.be\\/(.*?)\\??.*)$";
-	
+
+	public const string RightDeleteOther = "del.other";
+	public const string RightSkipOther = "skip.other";
+	public const string RightOverrideQueueCommandCheck = "queue.view.full";
+
 	private Thread descThread;
 	private bool running;
 	private string title;
@@ -77,26 +81,26 @@ public class KDFCommands : IBotPlugin {
 			}
 		}
 	}
-	
-	private string getInvokerName(InvokerData invoker) {
-		return ts3FullClient.GetClientNameFromUid(invoker.ClientUid).Value.Name;
+
+	private string GetClientNameFormUid(Uid id) {
+		return ts3FullClient.GetClientNameFromUid(id).Value.Name;
+	}
+
+	private string GetInvokerName(InvokerData invoker) {
+		return GetClientNameFormUid(invoker.ClientUid);
 	}
 	
-	private string getTitleAtIndex(IReadOnlyPlaylist queue, int index) {
+	private string GetTitleAtIndex(IReadOnlyPlaylist queue, int index) {
 		return queue[index].AudioResource.ResourceTitle;
 	}
-	
-	private string getNameAtIndex(IReadOnlyPlaylist queue, int index) {
-		return ts3FullClient.GetClientNameFromUid(queue[index].Meta.ResourceOwnerUid).Value.Name;
+
+	private string GetNameAtIndex(IReadOnlyPlaylist queue, int index) {
+		return GetClientNameFormUid(queue[index].Meta.ResourceOwnerUid);
 	}
-	
-	private bool inServerGroup(ClientCall cc, ulong groupId) {
-		return Array.Exists(cc.ServerGroups, elem => elem.Value == groupId);
-	}
-	
+
 	private void Start(object sender, PlayInfoEventArgs e) {
 		title = e.ResourceData.ResourceTitle;
-		username = getInvokerName(e.Invoker);
+		username = GetInvokerName(e.Invoker);
 	}
 	
 	private void Stop(object sender, SongEndEventArgs e) { }
@@ -151,8 +155,6 @@ public class KDFCommands : IBotPlugin {
 		}
 	}
 
-	public const string RightOverrideQueueCommandCheck = "queue.view.full";
-
 	[Command("del")]
 	public void CommandDelete(ExecutionInformation info, InvokerData invoker, ClientCall cc, int id) {
 		var queue = playlistManager.CurrentList;
@@ -162,7 +164,7 @@ public class KDFCommands : IBotPlugin {
 		}
 	
 		PlaylistItem item = queue[id];
-		if (invoker.ClientUid == item.Meta.ResourceOwnerUid || info.HasRights(RightOverrideQueueCommandCheck)) {
+		if (invoker.ClientUid == item.Meta.ResourceOwnerUid || info.HasRights(RightDeleteOther)) {
 			playlistManager.ModifyPlaylist(".mix", mix => mix.RemoveAt(id));
 			ts3Client.SendMessage(
 				"Removed " + item.AudioResource.ResourceTitle + " (position " + id + ") from the queue.",
@@ -172,7 +174,7 @@ public class KDFCommands : IBotPlugin {
 				CommandExceptionReason.CommandError);
 		}
 	}
-	
+
 	[Command("queue")]
 	public string CommandQueue(ExecutionInformation info, InvokerData invoker, string arg = null) {
 		bool full = arg == "full";
@@ -190,16 +192,16 @@ public class KDFCommands : IBotPlugin {
 	
 		string output = "";
 		if (playManager.IsPlaying) {
-			output += "Current song: " + getTitleAtIndex(queue, playlistManager.Index) + " - " +
-			          getNameAtIndex(queue, playlistManager.Index);
+			output += "Current song: " + GetTitleAtIndex(queue, playlistManager.Index) + " - " +
+			          GetNameAtIndex(queue, playlistManager.Index);
 		}
 	
 		for (int i = playlistManager.Index + 1; i < queue.Items.Count; i++) {
 			if (printAll || queue[i].Meta.ResourceOwnerUid == invoker.ClientUid) {
-				output += "\n[" + (i - playlistManager.Index) + "] " + getTitleAtIndex(queue, i) + " - " +
-				          getNameAtIndex(queue, i);
+				output += "\n[" + (i - playlistManager.Index) + "] " + GetTitleAtIndex(queue, i) + " - " +
+				          GetNameAtIndex(queue, i);
 			} else {
-				output += "\n[" + (i - playlistManager.Index) + "] Hidden Song Name - " + getNameAtIndex(queue, i);
+				output += "\n[" + (i - playlistManager.Index) + "] Hidden Song Name - " + GetNameAtIndex(queue, i);
 			}
 		}
 	
@@ -207,12 +209,11 @@ public class KDFCommands : IBotPlugin {
 	}
 	
 	[Command("skip")]
-	public string CommandSkip(ResolveContext resolver, InvokerData invoker, ClientCall cc) {
+	public string CommandSkip(ExecutionInformation info, InvokerData invoker, ClientCall cc) {
 		var queue = playlistManager.CurrentList;
 	
 		if (playManager.IsPlaying) {
-			if (inServerGroup(cc, 49) || inServerGroup(cc, 73) ||
-			    invoker.ClientUid == queue[playlistManager.Index].Meta.ResourceOwnerUid) {
+			if (invoker.ClientUid == queue[playlistManager.Index].Meta.ResourceOwnerUid || info.HasRights(RightSkipOther)) {
 				playManager.Next(invoker).UnwrapThrow();
 				return "Skipped current song.";
 			} else {
