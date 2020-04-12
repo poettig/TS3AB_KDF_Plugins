@@ -33,6 +33,8 @@ public class KDFCommands : IBotPlugin {
 	public const string RightSkipOther = "skip.other";
 	public const string RightOverrideQueueCommandCheck = "queue.view.full";
 
+	private static readonly object delLock = new object();
+
 	private delegate void PartHandler(
 		PlayManager playManager,
 		PlaylistManager playlistManager,
@@ -89,7 +91,7 @@ public class KDFCommands : IBotPlugin {
 	}
 
 	private void Stop(object sender, SongEndEventArgs e) { }
-	
+
 	private void DescriptionUpdater() {
 		while (running) {
 			if (playManager.IsPlaying) {
@@ -177,7 +179,7 @@ public class KDFCommands : IBotPlugin {
 			}
 
 			// Check if URL
-			string query = part.Replace("[URL]", "").Replace("[/URL]", "");
+			string query = part.Trim(' ').Replace("[URL]", "").Replace("[/URL]", "");
 			if (Regex.Match(query, YOUTUBE_URL_REGEX).Success) {
 				ifURL(playManager, playlistManager, execInfo, invoker, resolver, cc, ts3Client, query, target);
 			} else {
@@ -306,27 +308,81 @@ public class KDFCommands : IBotPlugin {
 		}
 	}
 
-	[Command("del")]
-	public static void CommandDelete(PlaylistManager playlistManager, ExecutionInformation info, InvokerData invoker, ClientCall cc, Ts3Client ts3Client, int id) {
+	private static SortedSet<int> parseAndMap(PlaylistManager playlistManager, string indicesString) {
 		var queue = playlistManager.CurrentList;
 
-		// Calculate real id in playlist
-		int realId = id + playlistManager.Index;
+		SortedSet<int> indices = new SortedSet<int>();
+		string[] parts = Regex.Split(indicesString, ",+");
+		foreach (string part in parts) {
+			if (part == "") {
+				continue;
+			}
 
-		if (realId >= queue.Items.Count) {
-			throw new CommandException("There is no song with that index in the queue.",
-				CommandExceptionReason.CommandError);
+			var result = Regex.Match(part, "^(\\d+)-(\\d+)$");
+			if (result.Success) {
+				// Range, parse it
+				int start = Int32.Parse(result.Groups[1].Value);
+				int end = Int32.Parse(result.Groups[2].Value);
+
+				for (int i = start; i <= end; i++) {
+					if (i == 0) {
+						throw new CommandException("You can't delete the currently running song (index 0).", CommandExceptionReason.CommandError);
+					}
+
+					int realIndex = playlistManager.Index + i;
+					if (realIndex >= queue.Items.Count) {
+						throw new CommandException("There is no song in the queue with the index " + i, CommandExceptionReason.CommandError);
+					}
+					indices.Add(realIndex);
+				}
+			} else {
+				if (Int32.TryParse(part, out int index)) {
+					if (index < 0) {
+						throw new CommandException("Given index is negative: " + part, CommandExceptionReason.CommandError);
+					}
+
+					if (index == 0) {
+						throw new CommandException("You can't delete the currently running song (index 0).", CommandExceptionReason.CommandError);
+					}
+
+					int realIndex = playlistManager.Index + index;
+					if (realIndex >= queue.Items.Count) {
+						throw new CommandException("There is no song in the queue with the index " + index, CommandExceptionReason.CommandError);
+					}
+					indices.Add(realIndex);
+				} else {
+					throw new CommandException("Invalid index: " + part, CommandExceptionReason.CommandError);
+				}
+			}
 		}
-	
-		PlaylistItem item = queue[realId];
-		if (invoker.ClientUid == item.Meta.ResourceOwnerUid || info.HasRights(RightDeleteOther)) {
-			playlistManager.ModifyPlaylist(".mix", mix => mix.RemoveAt(realId));
-			ts3Client.SendMessage(
-				"Removed " + item.AudioResource.ResourceTitle + " (position " + id + ") from the queue.",
-				cc.ClientId.Value);
-		} else {
-			throw new CommandException("You have no permission to delete this song from the queue.",
-				CommandExceptionReason.CommandError);
+
+		return indices;
+	}
+
+	[Command("del", "lol das is ne hilfe")]
+	public static void CommandDelete(PlaylistManager playlistManager, ExecutionInformation info, InvokerData invoker, ClientCall cc, Ts3Client ts3Client, string idList) {
+		lock(delLock) {
+			var queue = playlistManager.CurrentList;
+
+			// Parse id list and map to real ids. Throws CommandException when one does not exist or there is a syntax error.
+			// Set because duplicates should be ignored
+			SortedSet<int> indices = parseAndMap(playlistManager, idList);
+
+			// Sort into reverse order, otherwise the indices would shift while removing
+			foreach (int index in indices.Reverse()) {
+				PlaylistItem item = queue[index];
+				if (invoker.ClientUid == item.Meta.ResourceOwnerUid || info.HasRights(RightDeleteOther)) {
+					playlistManager.ModifyPlaylist(".mix", mix => mix.RemoveAt(index));
+					ts3Client.SendMessage(
+						"Removed '" + item.AudioResource.ResourceTitle +
+						"' (position " + (index - playlistManager.Index) +
+						") from the queue.", cc.ClientId.Value
+					);
+				} else {
+					throw new CommandException("You have no permission to delete this song from the queue.",
+						CommandExceptionReason.CommandError);
+				}
+			}
 		}
 	}
 
@@ -363,20 +419,49 @@ public class KDFCommands : IBotPlugin {
 	
 		return output;
 	}
-	
+
 	[Command("skip")]
 	public static string CommandSkip(PlayManager playManager, PlaylistManager playlistManager, ExecutionInformation info, InvokerData invoker, ClientCall cc) {
-		var queue = playlistManager.CurrentList;
-	
-		if (playManager.IsPlaying) {
-			if (invoker.ClientUid == queue[playlistManager.Index].Meta.ResourceOwnerUid || info.HasRights(RightSkipOther)) {
-				playManager.Next(invoker).UnwrapThrow();
-				return "Skipped current song.";
+		lock (delLock) {
+			var queue = playlistManager.CurrentList;
+
+			if (playManager.IsPlaying) {
+				if (invoker.ClientUid == queue[playlistManager.Index].Meta.ResourceOwnerUid || info.HasRights(RightSkipOther)) {
+					playManager.Next(invoker).UnwrapThrow();
+					return "Skipped current song.";
+				} else {
+					return "You have no permission to skip this song.";
+				}
 			} else {
-				return "You have no permission to skip this song.";
+				return "There is not song currently playing.";
 			}
-		} else {
-			return "There is not song currently playing.";
+		}
+	}
+	
+	[Command("skip")]
+	public static void CommandSkip(
+			PlayManager playManager,
+			PlaylistManager playlistManager,
+			ExecutionInformation info,
+			InvokerData invoker,
+			Ts3Client ts3Client,
+			ClientCall cc,
+			int count) {
+		lock (delLock) {
+			var queue = playlistManager.CurrentList;
+			for (int i = 0; i < count; i++) {
+				if (playManager.IsPlaying) {
+					if (invoker.ClientUid == queue[playlistManager.Index].Meta.ResourceOwnerUid || info.HasRights(RightSkipOther)) {
+						playManager.Next(invoker).UnwrapThrow();
+						ts3Client.SendMessage("Skipped the current song.", cc.ClientId.Value);
+					} else {
+						throw new CommandException("You have no permission to skip this song.", CommandExceptionReason.CommandError);
+					}
+				} else {
+					throw new CommandException("There is not song currently playing.", CommandExceptionReason.CommandError);
+				}
+			}
+			Thread.Sleep(100);
 		}
 	}
 

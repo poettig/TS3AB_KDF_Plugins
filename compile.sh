@@ -10,17 +10,13 @@ error() {
 	exit 1
 }
 
-if [ -n "$1" ] && [ "$1" == "-po" ]; then
-	pluginsOnly=1
-fi
-
 # Recompile the bot
-if ! [ $pluginsOnly ]; then
-	echo -e "\033[1;33mRecompiling the bot...\033[0m"
-	if ! [ -d TS3AudioBot ]; then
-		git clone --recursive https://github.com/jwiesler/TS3AudioBot.git || error "Failed to clone repository."
-	fi
-	cd TS3AudioBot || error "Failed to cd into the bot repository."
+echo -e "\033[1;33mRecompiling the bot...\033[0m"
+if ! [ -d TS3AudioBot ]; then
+	git clone --recursive https://github.com/jwiesler/TS3AudioBot.git || error "Failed to clone repository."
+fi
+cd TS3AudioBot || error "Failed to cd into the bot repository."
+if git pull --dry-run | grep -q 'Already up to date.'; then
 	git pull || error "Failed to pull repository."
 	sed -i -e '/GitVersionTask/,+3d' TS3AudioBot/TS3AudioBot.csproj # Fix bug in master with GitVersionTask
 	dotnet build --framework netcoreapp3.1 --configuration Release TS3AudioBot || error "Compilation of TS3AudioBot failed."
@@ -28,6 +24,9 @@ if ! [ $pluginsOnly ]; then
 	cd ..
 	echo -e "\033[1;33mFinished building the bot!\033[0m"
 	echo "---------------------------------------------------"
+else
+	cd ..
+	echo "Nothing to do."
 fi
 
 for plugin in */; do
