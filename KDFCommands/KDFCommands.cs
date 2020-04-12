@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Text.RegularExpressions;
 using Microsoft.VisualBasic;
@@ -367,22 +368,42 @@ public class KDFCommands : IBotPlugin {
 			// Parse id list and map to real ids. Throws CommandException when one does not exist or there is a syntax error.
 			// Set because duplicates should be ignored
 			SortedSet<int> indices = parseAndMap(playlistManager, idList);
+			List<(int, string)> succeded = new List<(int, string)>();
+			List<(int, string)> failed = new List<(int, string)>();
 
-			// Sort into reverse order, otherwise the indices would shift while removing
-			foreach (int index in indices.Reverse()) {
-				PlaylistItem item = queue[index];
-				if (invoker.ClientUid == item.Meta.ResourceOwnerUid || info.HasRights(RightDeleteOther)) {
-					playlistManager.ModifyPlaylist(".mix", mix => mix.RemoveAt(index));
-					ts3Client.SendMessage(
-						"Removed '" + item.AudioResource.ResourceTitle +
-						"' (position " + (index - playlistManager.Index) +
-						") from the queue.", cc.ClientId.Value
-					);
-				} else {
-					throw new CommandException("You have no permission to delete this song from the queue.",
-						CommandExceptionReason.CommandError);
+			playlistManager.ModifyPlaylist(".mix", mix => {
+				// Sort into reverse order, otherwise the indices would shift while removing
+				foreach (int index in indices.Reverse()) {
+					PlaylistItem item = queue[index];
+					if (invoker.ClientUid == item.Meta.ResourceOwnerUid || info.HasRights(RightDeleteOther)) {
+						mix.RemoveAt(index);
+						succeded.Add((index, item.AudioResource.ResourceTitle));
+					} else {
+						failed.Add((index, item.AudioResource.ResourceTitle));
+					}
+				}
+			});
+			
+			StringBuilder output = new StringBuilder();
+			if (succeded.Count > 0) {
+				output.Append("Removed the following songs:");
+				foreach ((int index, string title) in succeded) {
+					output.Append('\n');
+					output.Append('[').Append(index).Append("] ").Append(title);
 				}
 			}
+
+			if (failed.Count > 0) {
+				if (succeded.Count > 0)
+					output.Append('\n');
+				output.Append("Failed to remove the following songs:");
+				foreach ((int index, string title) in succeded) {
+					output.Append('\n');
+					output.Append('[').Append(index).Append("] ").Append(title);
+				}
+			}
+			
+			ts3Client.SendMessage(output.ToString(), cc.ClientId.Value);
 		}
 	}
 
