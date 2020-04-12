@@ -134,7 +134,7 @@ public class KDFCommands : IBotPlugin {
 		var plist = playlistManager.LoadPlaylist(listId).UnwrapThrow();
 		var items = new List<PlaylistItem>(plist.Items);
 	
-		int count = countOpt.HasValue ? Tools.Clamp(countOpt.Value, 0, items.Count) : items.Count;
+		int count = Tools.Clamp(countOpt.HasValue ? countOpt.Value : 1, 0, items.Count);
 	
 		Shuffle(items, new Random());
 		playManager.Enqueue(invoker, items.Take(count)).UnwrapThrow();
