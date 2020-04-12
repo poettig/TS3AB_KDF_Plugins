@@ -180,7 +180,7 @@ public class KDFCommands : IBotPlugin {
 			}
 
 			// Check if URL
-			string query = part.Trim(' ').Replace("[URL]", "").Replace("[/URL]", "");
+			string query = part.Replace("[URL]", "").Replace("[/URL]", "").Trim(' ');
 			if (Regex.Match(query, YOUTUBE_URL_REGEX).Success) {
 				ifURL(playManager, playlistManager, execInfo, invoker, resolver, cc, ts3Client, query, target);
 			} else {
@@ -231,7 +231,7 @@ public class KDFCommands : IBotPlugin {
 	}
 
 	[Command("list youtube add")]
-	public static void CommandYoutube(
+	public static void CommandListYoutube(
 			PlayManager playManager,
 			PlaylistManager playlistManager,
 			ExecutionInformation execInfo,
@@ -360,7 +360,7 @@ public class KDFCommands : IBotPlugin {
 		return indices;
 	}
 
-	[Command("del", "lol das is ne hilfe")]
+	[Command("del")]
 	public static void CommandDelete(PlaylistManager playlistManager, ExecutionInformation info, InvokerData invoker, ClientCall cc, Ts3Client ts3Client, string idList) {
 		lock(delLock) {
 			var queue = playlistManager.CurrentList;
@@ -422,13 +422,13 @@ public class KDFCommands : IBotPlugin {
 		if (queue.Items.Count == 0) {
 			return "There is nothing on right now...";
 		}
-	
+
 		string output = "";
 		if (playManager.IsPlaying) {
 			output += "Current song: " + GetTitleAtIndex(queue, playlistManager.Index) + " - " +
 			          GetNameAtIndex(queue, playlistManager.Index, ts3FullClient);
 		}
-	
+
 		for (int i = playlistManager.Index + 1; i < queue.Items.Count; i++) {
 			if (printAll || queue[i].Meta.ResourceOwnerUid == invoker.ClientUid) {
 				output += "\n[" + (i - playlistManager.Index) + "] " + GetTitleAtIndex(queue, i) + " - " +
@@ -484,6 +484,47 @@ public class KDFCommands : IBotPlugin {
 			}
 			Thread.Sleep(100);
 		}
+	}
+
+	[Command("front")]
+	public static string CommandYoutubeFront(
+			PlayManager playManager,
+			PlaylistManager playlistManager,
+			ExecutionInformation execInfo,
+			ResolveContext resolver,
+			InvokerData invoker,
+			ClientCall cc,
+			Ts3Client ts3Client,
+			string message) {
+
+		// If the current song is the last in the queue, add normally
+		IReadOnlyPlaylist queue = playlistManager.CurrentList;
+		if (playlistManager.Index == queue.Items.Count || playlistManager.Index == queue.Items.Count - 1) {
+			CommandYoutube(playManager, playlistManager, execInfo, resolver, invoker, cc, ts3Client, message);
+			return null;
+		}
+
+		// The index of front is outside of the queue, reject
+		if (playlistManager.Index + 1 >= queue.Items.Count) {
+			throw new CommandException("The index of the front would be outside of the queue!", CommandExceptionReason.CommandError);
+		}
+
+		AudioResource resource = null;
+
+		// Check if URL
+		string query = message.Replace("[URL]", "").Replace("[/URL]", "").Trim(' ');
+		if (Regex.Match(query, YOUTUBE_URL_REGEX).Success) {
+			resource = resolver.Load(query, "youtube").UnwrapThrow().BaseData;
+		} else {
+			var result = resolver.Search("youtube", query).UnwrapThrow();
+			resource = result[0];
+		}
+
+		MetaData meta = new MetaData();
+		meta.ResourceOwnerUid = invoker.ClientUid;
+
+		playlistManager.ModifyPlaylist(".mix", mix => mix.Insert(playlistManager.Index + 1, new PlaylistItem(resource, meta))).UnwrapThrow();
+		return "Added '" + resource.ResourceTitle + "' to the front of the queue.";
 	}
 
 	[Command("search list add")]

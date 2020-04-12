@@ -10,13 +10,8 @@ error() {
 	exit 1
 }
 
-# Recompile the bot
-echo -e "\033[1;33mRecompiling the bot...\033[0m"
-if ! [ -d TS3AudioBot ]; then
-	git clone --recursive https://github.com/jwiesler/TS3AudioBot.git || error "Failed to clone repository."
-fi
-cd TS3AudioBot || error "Failed to cd into the bot repository."
-if git pull --dry-run | grep -q 'Already up to date.'; then
+compileBot() {
+	cd TS3AudioBot || error "Failed to cd into the bot repository."
 	git pull || error "Failed to pull repository."
 	sed -i -e '/GitVersionTask/,+3d' TS3AudioBot/TS3AudioBot.csproj # Fix bug in master with GitVersionTask
 	dotnet build --framework netcoreapp3.1 --configuration Release TS3AudioBot || error "Compilation of TS3AudioBot failed."
@@ -24,9 +19,20 @@ if git pull --dry-run | grep -q 'Already up to date.'; then
 	cd ..
 	echo -e "\033[1;33mFinished building the bot!\033[0m"
 	echo "---------------------------------------------------"
+}
+
+# Recompile the bot
+echo -e "\033[1;33mRecompiling the bot...\033[0m"
+if ! [ -d TS3AudioBot ]; then
+	git clone --recursive https://github.com/jwiesler/TS3AudioBot.git || error "Failed to clone repository."
+	compileBot
 else
-	cd ..
-	echo "Nothing to do."
+	if git pull --dry-run | grep -q 'Already up to date.'; then
+		compileBot
+	else
+		cd ..
+		echo "Nothing to do."
+	fi
 fi
 
 for plugin in */; do
