@@ -23,7 +23,6 @@ public class KDFCommands : IBotPlugin {
 	
 	internal class CommandsBag : ICommandBag {
 		public IReadOnlyCollection<BotCommand> BagCommands { get; } = ImmutableList<BotCommand>.Empty;
-
 		public IReadOnlyCollection<string> AdditionalRights { get; } = new []{ RightOverrideQueueCommandCheck, RightDeleteOther, RightSkipOther };
 	}
 	
@@ -34,33 +33,46 @@ public class KDFCommands : IBotPlugin {
 	public const string RightSkipOther = "skip.other";
 	public const string RightOverrideQueueCommandCheck = "queue.view.full";
 
+	private delegate void PartHandler(
+		PlayManager playManager,
+		PlaylistManager playlistManager,
+		ExecutionInformation execInfo,
+		InvokerData invoker,
+		ResolveContext resolver,
+		ClientCall cc,
+		Ts3Client ts3Client,
+		string query,
+		string target
+	);
+
 	private Thread descThread;
 	private bool running;
 	private string title;
 	private string username;
-	private int lastStartedIndex;
-	
+
 	private Player player;
 	private PlayManager playManager;
 	private PlaylistManager playlistManager;
 	private Ts3Client ts3Client;
 	private TsFullClient ts3FullClient;
-	
-	// Your dependencies will be injected into the constructor of your class.
+
 	public KDFCommands(
-		Player player, PlayManager playManager, PlaylistManager playlistManager, Ts3Client ts3Client,
-		TsFullClient ts3FullClient, CommandManager commandManager) {
+			Player player,
+			PlayManager playManager,
+			PlaylistManager playlistManager,
+			Ts3Client ts3Client,
+			TsFullClient ts3FullClient,
+			CommandManager commandManager) {
 		this.player = player;
 		this.playManager = playManager;
 		this.playlistManager = playlistManager;
 		this.ts3Client = ts3Client;
 		this.ts3FullClient = ts3FullClient;
-		commandManager.RegisterCollection(Bag);
-		
 		this.running = false;
+
+		commandManager.RegisterCollection(Bag);
 	}
 	
-	// The Initialize method will be called when all modules were successfully injected.
 	public void Initialize() {
 		playManager.AfterResourceStarted += Start;
 		playManager.ResourceStopped += Stop;
@@ -70,6 +82,13 @@ public class KDFCommands : IBotPlugin {
 		running = true;
 		descThread.Start();
 	}
+
+	private void Start(object sender, PlayInfoEventArgs e) {
+		title = e.ResourceData.ResourceTitle;
+		username = GetClientNameFromUid(ts3FullClient, e.PlayResource.Meta.ResourceOwnerUid);
+	}
+
+	private void Stop(object sender, SongEndEventArgs e) { }
 	
 	private void DescriptionUpdater() {
 		while (running) {
@@ -83,26 +102,19 @@ public class KDFCommands : IBotPlugin {
 		}
 	}
 
-	private string GetClientNameFromUid(Uid id) {
+	private static string GetClientNameFromUid(TsFullClient ts3FullClient, Uid id) {
 		return ts3FullClient.GetClientNameFromUid(id).Value.Name;
 	}
 
-	private string GetTitleAtIndex(IReadOnlyPlaylist queue, int index) {
+	private static string GetTitleAtIndex(IReadOnlyPlaylist queue, int index) {
 		return queue[index].AudioResource.ResourceTitle;
 	}
 
-	private string GetNameAtIndex(IReadOnlyPlaylist queue, int index) {
-		return GetClientNameFromUid(queue[index].Meta.ResourceOwnerUid);
+	private static string GetNameAtIndex(IReadOnlyPlaylist queue, int index, TsFullClient ts3FullClient) {
+		return GetClientNameFromUid(ts3FullClient, queue[index].Meta.ResourceOwnerUid);
 	}
 
-	private void Start(object sender, PlayInfoEventArgs e) {
-		title = e.ResourceData.ResourceTitle;
-		username = GetClientNameFromUid(e.PlayResource.Meta.ResourceOwnerUid);
-	}
-	
-	private void Stop(object sender, SongEndEventArgs e) { }
-	
-	public static void Shuffle<T>(IList<T> list, Random rng) {
+	private static void Shuffle<T>(IList<T> list, Random rng) {
 		int n = list.Count;
 		while (n > 1) {
 			n--;
@@ -126,43 +138,189 @@ public class KDFCommands : IBotPlugin {
 		playManager.Enqueue(invoker, items.Take(count)).UnwrapThrow();
 	}
 	
-	// You should prefer static methods which get the modules injected via parameter unless
-	// you actually need objects from your plugin in your method.
 	[Command("youtube")]
-	public void CommandYoutube(ResolveContext resolver, InvokerData invoker, ClientCall cc, string message) {
+	public static void CommandYoutube(
+			PlayManager playManager,
+			PlaylistManager playlistManager,
+			ExecutionInformation execInfo,
+			ResolveContext resolver,
+			InvokerData invoker,
+			ClientCall cc,
+			Ts3Client ts3Client,
+			string message) {
+
 		string[] parts = Regex.Split(message, ";+");
-		ts3Client.SendMessage("Received your request to add " + parts.Length + " songs, processing...",
-			cc.ClientId.Value);
-	
+		ts3Client.SendMessage("Received your request to add " + parts.Length + " songs, processing...", cc.ClientId.Value);
+
+		PartHandler urlHandler = AddUrl;
+		PartHandler queryHandler = AddQuery;
+		ParseMulti(urlHandler, queryHandler, playManager, playlistManager, execInfo, resolver, invoker, cc, ts3Client, parts);
+	}
+
+	private static void ParseMulti(
+			PartHandler ifURL,
+			PartHandler ifQuery,
+			PlayManager playManager,
+			PlaylistManager playlistManager,
+			ExecutionInformation execInfo,
+			ResolveContext resolver,
+			InvokerData invoker,
+			ClientCall cc,
+			Ts3Client ts3Client,
+			string[] parts,
+			string target = "") {
+
 		foreach (string part in parts) {
+			// Skip if empty
+			if (part == "") {
+				return;
+			}
+
 			// Check if URL
 			string query = part.Replace("[URL]", "").Replace("[/URL]", "");
-			var match = Regex.Match(query, YOUTUBE_URL_REGEX);
-			if (match.Success) {
-				playManager.Enqueue(invoker, query);
-				ts3Client.SendMessage("Added " + query, cc.ClientId.Value);
+			if (Regex.Match(query, YOUTUBE_URL_REGEX).Success) {
+				ifURL(playManager, playlistManager, execInfo, invoker, resolver, cc, ts3Client, query, target);
 			} else {
-				var result = resolver.Search("youtube", query).UnwrapThrow();
-				var audioResource = result[0];
-				playManager.Enqueue(invoker, audioResource);
-				ts3Client.SendMessage(
-					"Added '" + audioResource.ResourceTitle + "' for your request '" +
-					query.Replace("[URL]", "").Replace("[/URL]", "") + "'", cc.ClientId.Value);
+				ifQuery(playManager, playlistManager, execInfo, invoker, resolver, cc, ts3Client, query, target);
 			}
 		}
 	}
 
+	private static void AddUrl(
+			PlayManager playManager,
+		 	PlaylistManager playlistManager,
+		 	ExecutionInformation execInfo,
+		 	InvokerData invoker,
+		 	ResolveContext resolver,
+		 	ClientCall cc,
+		 	Ts3Client ts3Client,
+		 	string url,
+		 	string target) {
+
+		if (playManager.Enqueue(invoker, url).UnwrapSendMessage(ts3Client, cc, url)) {
+			IReadOnlyPlaylist queue = playlistManager.CurrentList;
+			int realIndex = queue.Items.Count - 1;
+			int index = realIndex - playlistManager.Index;
+			ts3Client.SendMessage("Added '" + GetTitleAtIndex(queue, realIndex) + "' at queue position " + index, cc.ClientId.Value);
+		}
+	}
+
+	private static void AddQuery(
+			PlayManager playManager,
+			PlaylistManager playlistManager,
+			ExecutionInformation execInfo,
+			InvokerData invoker,
+			ResolveContext resolver,
+			ClientCall cc,
+			Ts3Client ts3Client,
+			string query,
+			string target) {
+
+		var result = resolver.Search("youtube", query).UnwrapSendMessage(ts3Client, cc, query);
+		if (result != null) {
+			AudioResource audioResource = result[0];
+			if (playManager.Enqueue(invoker, audioResource).UnwrapSendMessage(ts3Client, cc, query)) {
+				IReadOnlyPlaylist queue = playlistManager.CurrentList;
+				int index = queue.Items.Count - playlistManager.Index - 1;
+				ts3Client.SendMessage("Added '" + audioResource.ResourceTitle + "' for your request '" + query + "' at queue position " + index, cc.ClientId.Value);
+			}
+		}
+	}
+
+	[Command("list youtube add")]
+	public static void CommandYoutube(
+			PlayManager playManager,
+			PlaylistManager playlistManager,
+			ExecutionInformation execInfo,
+			ResolveContext resolver,
+			InvokerData invoker,
+			ClientCall cc,
+			Ts3Client ts3Client,
+			string listId,
+			string message) {
+
+		string[] parts = Regex.Split(message, ";+");
+		ts3Client.SendMessage("Received your request to add " + parts.Length + " songs to the playlist '" + listId + "', processing...", cc.ClientId.Value);
+
+		PartHandler urlHandler = ListAddUrl;
+		PartHandler queryHandler = ListAddQuery;
+		ParseMulti(urlHandler, queryHandler, playManager, playlistManager, execInfo, resolver, invoker, cc, ts3Client, parts, listId);
+	}
+
+	private static void ListAddUrl(
+			PlayManager playManager,
+			PlaylistManager playlistManager,
+			ExecutionInformation execInfo,
+			InvokerData invoker,
+			ResolveContext resolver,
+			ClientCall cc,
+			Ts3Client ts3Client,
+			string url,
+			string target) {
+
+		try {
+			MainCommands.CommandListAddInternal(resolver, playlistManager, execInfo, target, url);
+		} catch (CommandException e) {
+			ts3Client.SendMessage("Error occured for '" + url + "': " + e.Message, cc.ClientId.Value);
+			return;
+		}
+
+		IReadOnlyPlaylist playlist = playlistManager.LoadPlaylist(target).Value; // No unwrap needed, playlist exists if code got here
+		int index = playlist.Items.Count - 1;
+		ts3Client.SendMessage(
+			"Added '" + GetTitleAtIndex(playlist, index) +
+			"' to playlist '" + target +
+			"' at position " + index, cc.ClientId.Value
+		);
+	}
+
+	private static void ListAddQuery(
+			PlayManager playManager,
+			PlaylistManager playlistManager,
+			ExecutionInformation execInfo,
+			InvokerData invoker,
+			ResolveContext resolver,
+			ClientCall cc,
+			Ts3Client ts3Client,
+			string query,
+			string target) {
+
+		var result = resolver.Search("youtube", query).UnwrapSendMessage(ts3Client, cc, query);
+		if (result != null) {
+			AudioResource audioResource = result[0];
+			try {
+				MainCommands.ListAddItem(playlistManager, execInfo, target, audioResource);
+			} catch (CommandException e) {
+				ts3Client.SendMessage("Error occured for + '" + query + "': " + e.Message, cc.ClientId.Value);
+				return;
+			}
+
+			IReadOnlyPlaylist playlist = playlistManager.LoadPlaylist(target).Value; // No unwrap needed, playlist exists if code got here
+			int index = playlist.Items.Count - 1;
+			ts3Client.SendMessage(
+				"Added '" + audioResource.ResourceTitle +
+				"' for your request '" + query +
+				"' to playlist '" + target +
+				"' at position " + index, cc.ClientId.Value
+			);
+		}
+	}
+
 	[Command("del")]
-	public void CommandDelete(ExecutionInformation info, InvokerData invoker, ClientCall cc, int id) {
+	public static void CommandDelete(PlaylistManager playlistManager, ExecutionInformation info, InvokerData invoker, ClientCall cc, Ts3Client ts3Client, int id) {
 		var queue = playlistManager.CurrentList;
-		if (id >= queue.Items.Count) {
+
+		// Calculate real id in playlist
+		int realId = id + playlistManager.Index;
+
+		if (realId >= queue.Items.Count) {
 			throw new CommandException("There is no song with that index in the queue.",
 				CommandExceptionReason.CommandError);
 		}
 	
-		PlaylistItem item = queue[id];
+		PlaylistItem item = queue[realId];
 		if (invoker.ClientUid == item.Meta.ResourceOwnerUid || info.HasRights(RightDeleteOther)) {
-			playlistManager.ModifyPlaylist(".mix", mix => mix.RemoveAt(id));
+			playlistManager.ModifyPlaylist(".mix", mix => mix.RemoveAt(realId));
 			ts3Client.SendMessage(
 				"Removed " + item.AudioResource.ResourceTitle + " (position " + id + ") from the queue.",
 				cc.ClientId.Value);
@@ -173,15 +331,15 @@ public class KDFCommands : IBotPlugin {
 	}
 
 	[Command("queue")]
-	public string CommandQueue(ExecutionInformation info, InvokerData invoker, string arg = null) {
+	public static string CommandQueue(PlayManager playManager, PlaylistManager playlistManager, ExecutionInformation info, InvokerData invoker, TsFullClient ts3FullClient, string arg = null) {
 		bool full = arg == "full";
 		if (full && !info.HasRights(RightOverrideQueueCommandCheck))
 			throw new CommandException("You have no permission to view the full queue.",
 				CommandExceptionReason.CommandError);
-		return CommandQueueInternal(invoker, full);
+		return CommandQueueInternal(playManager, playlistManager, invoker, ts3FullClient, full);
 	}
 	
-	private string CommandQueueInternal(InvokerData invoker, bool printAll) {
+	private static string CommandQueueInternal(PlayManager playManager, PlaylistManager playlistManager, InvokerData invoker, TsFullClient ts3FullClient, bool printAll) {
 		IReadOnlyPlaylist queue = playlistManager.CurrentList;
 
 		if (queue.Items.Count == 0) {
@@ -191,15 +349,15 @@ public class KDFCommands : IBotPlugin {
 		string output = "";
 		if (playManager.IsPlaying) {
 			output += "Current song: " + GetTitleAtIndex(queue, playlistManager.Index) + " - " +
-			          GetNameAtIndex(queue, playlistManager.Index);
+			          GetNameAtIndex(queue, playlistManager.Index, ts3FullClient);
 		}
 	
 		for (int i = playlistManager.Index + 1; i < queue.Items.Count; i++) {
 			if (printAll || queue[i].Meta.ResourceOwnerUid == invoker.ClientUid) {
 				output += "\n[" + (i - playlistManager.Index) + "] " + GetTitleAtIndex(queue, i) + " - " +
-				          GetNameAtIndex(queue, i);
+				          GetNameAtIndex(queue, i, ts3FullClient);
 			} else {
-				output += "\n[" + (i - playlistManager.Index) + "] Hidden Song Name - " + GetNameAtIndex(queue, i);
+				output += "\n[" + (i - playlistManager.Index) + "] Hidden Song Name - " + GetNameAtIndex(queue, i, ts3FullClient);
 			}
 		}
 	
@@ -207,7 +365,7 @@ public class KDFCommands : IBotPlugin {
 	}
 	
 	[Command("skip")]
-	public string CommandSkip(ExecutionInformation info, InvokerData invoker, ClientCall cc) {
+	public static string CommandSkip(PlayManager playManager, PlaylistManager playlistManager, ExecutionInformation info, InvokerData invoker, ClientCall cc) {
 		var queue = playlistManager.CurrentList;
 	
 		if (playManager.IsPlaying) {
