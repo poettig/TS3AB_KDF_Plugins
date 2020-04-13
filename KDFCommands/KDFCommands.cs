@@ -9,12 +9,14 @@ using Microsoft.VisualBasic;
 using TS3AudioBot;
 using TS3AudioBot.Audio;
 using TS3AudioBot.CommandSystem;
+using TS3AudioBot.CommandSystem.Text;
 using TS3AudioBot.Plugins;
 using TS3AudioBot.Playlists;
 using TS3AudioBot.ResourceFactories;
 using TS3AudioBot.Helper;
 using TS3AudioBot.Rights;
 using TS3AudioBot.Sessions;
+using TS3AudioBot.Web.Api;
 using TSLib;
 using TSLib.Full;
 using TSLib.Helper;
@@ -309,55 +311,61 @@ public class KDFCommands : IBotPlugin {
 		}
 	}
 
-	private static SortedSet<int> parseAndMap(PlaylistManager playlistManager, string indicesString) {
-		var queue = playlistManager.CurrentList;
-
+	private static SortedSet<int> ParseIndicesInBounds(string indicesString, int lower, int upper)
+	{	  
 		SortedSet<int> indices = new SortedSet<int>();
+		if (upper < lower)
+			return indices;
 		string[] parts = Regex.Split(indicesString, ",+");
-		foreach (string part in parts) {
-			if (part == "") {
+		foreach (string part in parts)
+		{
+			if (part.Length == 0)
+			{
 				continue;
 			}
 
 			var result = Regex.Match(part, "^(\\d+)-(\\d+)$");
-			if (result.Success) {
+			int start;
+			int end;
+			if (result.Success)
+			{
 				// Range, parse it
-				int start = Int32.Parse(result.Groups[1].Value);
-				int end = Int32.Parse(result.Groups[2].Value);
+				start = Int32.Parse(result.Groups[1].Value);
+				end = Int32.Parse(result.Groups[2].Value);
+			}
+			else if (Int32.TryParse(part, out int index)) {
+				start = end = index;
+			}
+			else
+			{
+				throw new CommandException("Invalid index: " + part, CommandExceptionReason.CommandError);
+			}
 
-				for (int i = start; i <= end; i++) {
-					if (i == 0) {
-						throw new CommandException("You can't delete the currently running song (index 0).", CommandExceptionReason.CommandError);
-					}
+			if (end < start)
+			{
+				throw new CommandException("Given range is invalid: " + start + "-" + end, CommandExceptionReason.CommandError);
+			}
 
-					int realIndex = playlistManager.Index + i;
-					if (realIndex >= queue.Items.Count) {
-						throw new CommandException("There is no song in the queue with the index " + i, CommandExceptionReason.CommandError);
-					}
-					indices.Add(realIndex);
-				}
-			} else {
-				if (Int32.TryParse(part, out int index)) {
-					if (index < 0) {
-						throw new CommandException("Given index is negative: " + part, CommandExceptionReason.CommandError);
-					}
+			if (upper < end) {
+				throw new CommandException("The given index is too big: " + end + " (max " + upper + ")", CommandExceptionReason.CommandError);
+			}
 
-					if (index == 0) {
-						throw new CommandException("You can't delete the currently running song (index 0).", CommandExceptionReason.CommandError);
-					}
-
-					int realIndex = playlistManager.Index + index;
-					if (realIndex >= queue.Items.Count) {
-						throw new CommandException("There is no song in the queue with the index " + index, CommandExceptionReason.CommandError);
-					}
-					indices.Add(realIndex);
-				} else {
-					throw new CommandException("Invalid index: " + part, CommandExceptionReason.CommandError);
-				}
+			if (start < lower) {
+				throw new CommandException("The given index is too small: " + start + " (min " + lower + ")", CommandExceptionReason.CommandError);
+			}
+			for (int i = start; i <= end; i++)
+			{
+				indices.Add(i);
 			}
 		}
 
 		return indices;
+	}
+
+	private static SortedSet<int> parseAndMap(PlaylistManager playlistManager, string indicesString)
+	{
+		var queue = playlistManager.CurrentList;
+		return ParseIndicesInBounds(indicesString, 1, queue.Items.Count - playlistManager.Index - 1);
 	}
 
 	[Command("del")]
@@ -532,6 +540,43 @@ public class KDFCommands : IBotPlugin {
 		AudioResource res = session.GetSearchResult(index);
 		MainCommands.ListAddItem(playlistManager, info, listId, res);
 		return "Ok";
+	}
+
+	public static bool Matches(string item, string query) {
+		return !string.IsNullOrEmpty(item) && item.Contains(query);
+	}
+
+	[Command("list item find")]
+	public static JsonArray<(PlaylistItem, int)> CommandItemFind(CallerInfo callerInfo, PlaylistManager playlistManager, string listId, string query) {
+		query = query.ToLower();
+		var plist = playlistManager.LoadPlaylist(listId).UnwrapThrow();
+		var results = plist.Items.Select((item, idx) => (item, idx))
+			.Where((item, idx) => Matches(item.item.AudioResource.ResourceTitle.ToLower(), query)).ToList();
+		return new JsonArray<(PlaylistItem, int)>(results, res => {
+			if (res.Count == 0)
+				return "No matching items.";
+			var tmb = new TextModBuilder(callerInfo.IsColor);
+			tmb.AppendFormat("Found {0} matching items:", res.Count.ToString());
+			foreach (var (item, idx) in res) {
+				tmb.AppendFormat("\n[{0}]: {1}", idx.ToString(), item.AudioResource.ResourceTitle);
+			}
+			return tmb.ToString();
+		});
+	}
+
+	[Command("list item queue")]
+	public static string CommandItemQueue(InvokerData invoker, PlaylistManager playlistManager, PlayManager playManager, string listId, string indicesString)
+	{
+		var plist = playlistManager.LoadPlaylist(listId).UnwrapThrow();
+		var indices = ParseIndicesInBounds(indicesString, 0, plist.Items.Count - 1);
+		var items = new List<PlaylistItem>(indices.Count);
+		foreach(var index in indices)
+		{
+			items.Add(plist.Items[index]);
+		}
+
+		playManager.Enqueue(invoker, items);
+		return $"Queued {items.Count} items from playlist {plist.Title}.";
 	}
 
 	public void Dispose() {
