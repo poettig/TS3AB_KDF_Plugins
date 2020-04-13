@@ -31,6 +31,10 @@ public class KDFCommands : IBotPlugin {
 	
 	private const string YOUTUBE_URL_REGEX =
 		"^(?:https?:\\/\\/)(?:www\\.)?(?:youtube\\.com\\/watch\\?v=(.*?)(?:&.*)*|youtu\\.be\\/(.*?)\\??.*)$";
+	private const string TRUNCATED_MESSAGE =
+		"\nThe number of songs to add was reduced compared to your request.\n" +
+		"This can happen because the requested number of songs was not evenly divisible by the number of playlists " +
+		"or at least one playlist had not enough songs (or both).";
 
 	public const string RightDeleteOther = "del.other";
 	public const string RightSkipOther = "skip.other";
@@ -131,16 +135,65 @@ public class KDFCommands : IBotPlugin {
 	}
 	
 	[Command("list rqueue")]
-	public static void CommandListRQueue(
-		PlaylistManager playlistManager, PlayManager playManager, InvokerData invoker, string listId,
-		int? countOpt = null) {
-		var plist = playlistManager.LoadPlaylist(listId).UnwrapThrow();
-		var items = new List<PlaylistItem>(plist.Items);
-	
-		int count = Tools.Clamp(countOpt.HasValue ? countOpt.Value : 1, 0, items.Count);
-	
-		Shuffle(items, new Random());
-		playManager.Enqueue(invoker, items.Take(count)).UnwrapThrow();
+	public static string CommandListRQueue(
+			PlaylistManager playlistManager,
+			PlayManager playManager,
+			InvokerData invoker,
+			string[] parts) {
+
+		bool truncated = false;
+		int startPos = playlistManager.CurrentList.Items.Count - playlistManager.Index;
+
+		// Check if last element is a number.
+		// If yes, remember it as number as songs to randomly queue and the last array entry when iterating playlists.
+		int count = 1;
+		int numPlaylists = parts.Length;
+		if (Int32.TryParse(parts[parts.Length - 1], out int countOutput)) {
+			count = countOutput;
+			numPlaylists--;
+
+			if (count < 0) {
+				throw new CommandException("You can't add a negative number of songs.", CommandExceptionReason.CommandError);
+			} else if (count == 0) {
+				throw new CommandException("Adding no songs doesn't make any sense.", CommandExceptionReason.CommandError);
+			}
+		}
+
+		// Calculate items per playlist
+		int songsPerPlaylist = count / numPlaylists;
+		if (count % numPlaylists != 0) {
+			truncated = true;
+		}
+
+		if (songsPerPlaylist == 0) {
+				throw new CommandException("You need to add least at one song per playlist.", CommandExceptionReason.CommandError);
+		}
+
+		int numSongsAdded = 0;
+		var allItems = new List<PlaylistItem>();
+		for (int i = 0; i < numPlaylists; i++) {
+			var plist = playlistManager.LoadPlaylist(parts[i]).UnwrapThrow();
+			var items = new List<PlaylistItem>(plist.Items);
+
+			int numSongsToTake = Tools.Clamp(songsPerPlaylist, 0, plist.Items.Count);
+			if (numSongsToTake != songsPerPlaylist) {
+				truncated = true;
+			}
+			numSongsAdded += numSongsToTake;
+
+			Shuffle(items, new Random());
+			allItems.AddRange(items.Take(numSongsToTake));
+		}
+
+		// Shuffle again across all added songs from all playlists
+		Shuffle(allItems, new Random());
+		playManager.Enqueue(invoker, allItems).UnwrapThrow();
+		return
+			"Added a total of " + numSongsAdded +
+			" songs across " + numPlaylists +
+			" playlists to the queue at positions " + startPos +
+			"-" + (startPos + numSongsAdded) +
+			"." + (truncated ? TRUNCATED_MESSAGE : "");
 	}
 	
 	[Command("youtube")]
@@ -468,7 +521,7 @@ public class KDFCommands : IBotPlugin {
 	}
 	
 	[Command("skip")]
-	public static void CommandSkip(
+	public static string CommandSkip(
 			PlayManager playManager,
 			PlaylistManager playlistManager,
 			ExecutionInformation info,
@@ -476,21 +529,41 @@ public class KDFCommands : IBotPlugin {
 			Ts3Client ts3Client,
 			ClientCall cc,
 			int count) {
-		lock (delLock) {
-			var queue = playlistManager.CurrentList;
-			for (int i = 0; i < count; i++) {
-				if (playManager.IsPlaying) {
-					if (invoker.ClientUid == queue[playlistManager.Index].Meta.ResourceOwnerUid || info.HasRights(RightSkipOther)) {
-						playManager.Next(invoker).UnwrapThrow();
-						ts3Client.SendMessage("Skipped the current song.", cc.ClientId.Value);
-					} else {
-						throw new CommandException("You have no permission to skip this song.", CommandExceptionReason.CommandError);
+
+		var queue = playlistManager.CurrentList;
+		int songsToDelete = count - 1;
+		int start = playlistManager.Index + 1;
+		int end = start + songsToDelete;
+
+		if (playManager.IsPlaying) {
+			// Put the number of entries to delete in bounds
+			if (queue.Items.Count >= end) {
+				end = queue.Items.Count - 1;
+			}
+
+			// Check rights
+			if (!info.HasRights(RightSkipOther)) {
+				// Check if the current song belongs to this user
+				if (invoker.ClientUid != queue[playlistManager.Index].Meta.ResourceOwnerUid) {
+					return "You have no permission to skip the current song.";
+				}
+
+				// Check if the songs to delete all belong to the user
+				for (int i = start; start <= end; i++) {
+					if (invoker.ClientUid != queue[i].Meta.ResourceOwnerUid) {
+						return "You have no permission to skip the song at queue position " + (i - playlistManager.Index);
 					}
-				} else {
-					throw new CommandException("There is not song currently playing.", CommandExceptionReason.CommandError);
 				}
 			}
-			Thread.Sleep(100);
+
+			// Delete the songs
+			CommandDelete(playlistManager, info, invoker, cc, ts3Client, start + "-" + end);
+
+			// Skip the current song
+			playManager.Next(invoker).UnwrapThrow();
+			return "Skipped this and the next " + songsToDelete + " songs.";
+		} else {
+			return "There is not song currently playing.";
 		}
 	}
 

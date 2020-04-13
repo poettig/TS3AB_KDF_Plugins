@@ -10,8 +10,22 @@ error() {
 	exit 1
 }
 
+isGitUpToDate() {
+	git remote update > /dev/null 2>&1
+
+	LOCAL=$(git rev-parse @)
+	REMOTE=$(git rev-parse origin/master)
+
+	if [ "$LOCAL" = "$REMOTE" ]; then
+		# Up to date
+		return 0 # Success exit code
+	else
+		# Not up to date
+		return 1 # Error exit code
+	fi
+}
+
 compileBot() {
-	cd TS3AudioBot || error "Failed to cd into the bot repository."
 	git pull || error "Failed to pull repository."
 	sed -i -e '/GitVersionTask/,+3d' TS3AudioBot/TS3AudioBot.csproj # Fix bug in master with GitVersionTask
 	dotnet build --framework netcoreapp3.1 --configuration Release TS3AudioBot || error "Compilation of TS3AudioBot failed."
@@ -25,9 +39,12 @@ compileBot() {
 echo -e "\033[1;33mRecompiling the bot...\033[0m"
 if ! [ -d TS3AudioBot ]; then
 	git clone --recursive https://github.com/jwiesler/TS3AudioBot.git || error "Failed to clone repository."
+	cd TS3AudioBot || error "Failed to cd into the bot repository."
 	compileBot
 else
-	if git pull --dry-run | grep -q 'Already up to date.'; then
+	cd TS3AudioBot || error "Failed to cd into the bot repository."
+
+	if ! isGitUpToDate; then
 		compileBot
 	else
 		cd ..
