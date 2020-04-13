@@ -546,12 +546,16 @@ public class KDFCommands : IBotPlugin {
 		return !string.IsNullOrEmpty(item) && item.Contains(query);
 	}
 
-	[Command("list item find")]
-	public static JsonArray<(PlaylistItem, int)> CommandItemFind(CallerInfo callerInfo, PlaylistManager playlistManager, string listId, string query) {
+	 private const string SessionKeyListSearchResults = "list-search-items";
+
+	[Command("list search item")]
+	public static JsonArray<(PlaylistItem, int)> CommandSearchItem(CallerInfo callerInfo, UserSession session, PlaylistManager playlistManager, string listId, string query) {
 		query = query.ToLower();
 		var plist = playlistManager.LoadPlaylist(listId).UnwrapThrow();
 		var results = plist.Items.Select((item, idx) => (item, idx))
 			.Where((item, idx) => Matches(item.item.AudioResource.ResourceTitle.ToLower(), query)).ToList();
+
+		  session.Set(SessionKeyListSearchResults, results);
 		return new JsonArray<(PlaylistItem, int)>(results, res => {
 			if (res.Count == 0)
 				return "No matching items.";
@@ -562,6 +566,31 @@ public class KDFCommands : IBotPlugin {
 			}
 			return tmb.ToString();
 		});
+	}
+
+	[Command("list search queue")]
+	public static string CommandSearchAdd(InvokerData invoker, UserSession session, PlayManager playManager) {
+		if (!session.Get<List<(PlaylistItem, int)>>(SessionKeyListSearchResults, out var items)) {
+			throw new CommandException("No search results found.", CommandExceptionReason.CommandError);
+		}
+
+		playManager.Enqueue(invoker, items.Select(item => item.Item1)).UnwrapThrow();
+		return $"Queued {items.Count} items.";
+	}
+
+	[Command("list search add")]
+	public static string CommandSearchAdd(ExecutionInformation info, UserSession session, PlaylistManager playlistManager, string listId)
+	{
+		if (!session.Get<List<(PlaylistItem, int)>>(SessionKeyListSearchResults, out var items))
+		{
+			throw new CommandException("No search results found.", CommandExceptionReason.CommandError);
+		}
+		
+		playlistManager.ModifyPlaylist(listId, list => {
+			MainCommands.CheckPlaylistModifiable(list, info, "modify");
+			list.AddRange(items.Select(item => item.Item1)).UnwrapThrow();
+		});
+		return $"Added {items.Count} items to {listId}.";
 	}
 
 	[Command("list item queue")]
@@ -575,7 +604,7 @@ public class KDFCommands : IBotPlugin {
 			items.Add(plist.Items[index]);
 		}
 
-		playManager.Enqueue(invoker, items);
+		playManager.Enqueue(invoker, items).UnwrapThrow();
 		return $"Queued {items.Count} items from playlist {plist.Title}.";
 	}
 
