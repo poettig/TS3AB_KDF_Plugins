@@ -55,8 +55,19 @@ public class KDFCommands : IBotPlugin {
 
 	private Thread descThread;
 	private bool running;
-	private string title;
-	private string username;
+
+	private class DescriptionThreadData {
+		public string Title { get; }
+		public string PlaylistId { get; }
+		public string Username { get; }
+		public DescriptionThreadData(string title, string playlistId, string username) {
+			Title = title;
+			PlaylistId = playlistId;
+			Username = username;
+		}
+	}
+
+	private DescriptionThreadData descriptionThreadData;
 
 	private Player player;
 	private PlayManager playManager;
@@ -80,33 +91,40 @@ public class KDFCommands : IBotPlugin {
 	}
 
 	public void Initialize() {
-		playManager.AfterResourceStarted += Start;
-		playManager.ResourceStopped += Stop;
+		playManager.AfterResourceStarted += StartRessource;
 
-		descThread = new Thread(new ThreadStart(DescriptionUpdater));
+		descThread = new Thread(DescriptionUpdater);
 		descThread.IsBackground = true;
 		running = true;
 		descThread.Start();
 	}
 
-	public void Start(object sender, PlayInfoEventArgs e) {
-		title = e.ResourceData.ResourceTitle;
-		username = GetClientNameFromUid(ts3FullClient, e.PlayResource.Meta.ResourceOwnerUid);
+	private void StartRessource(object sender, PlayInfoEventArgs e) {
+		descriptionThreadData = new DescriptionThreadData(
+			e.ResourceData.ResourceTitle, 
+			e.MetaData.ContainingPlaylistId, 
+			GetClientNameFromUid(ts3FullClient, e.PlayResource.Meta.ResourceOwnerUid));
 	}
-
-	public void Stop(object sender, SongEndEventArgs e) { }
 
 	private void DescriptionUpdater() {
 		while (running) {
 			if (playManager.IsPlaying) {
-				int queuelength = playManager.Queue.Items.Count - playManager.Queue.Index - 1;
+				var data = descriptionThreadData;
+				int queueLength = playManager.Queue.Items.Count - playManager.Queue.Index - 1;
 				TimeSpan timeLeftTS = player.Length.Subtract(player.Position);
-				string desc = "[" + username + " " + $"{timeLeftTS:mm\\:ss}" + " Q" + queuelength + "] - " + title;
-				ts3Client.ChangeDescription(desc).UnwrapThrow();
+				StringBuilder builder = new StringBuilder();
+				builder.Append("[");
+				if (data.Username != null)
+					builder.Append(data.Username);
+				builder.Append(" ").Append($"{timeLeftTS:mm\\:ss}");
+				builder.Append(" Q").Append(queueLength).Append("] ").Append(data.Title);
+				if (data.PlaylistId != null)
+					builder.Append(" <Playlist: ").Append(data.PlaylistId).Append(">");
+				ts3Client.ChangeDescription(builder.ToString()).UnwrapThrow();
+			}
 				Thread.Sleep(1000);
 			}
 		}
-	}
 
 	private static string GetClientNameFromUid(TsFullClient ts3FullClient, Uid? id) {
 		return id.HasValue ? ts3FullClient.GetClientNameFromUid(id.Value).Value.Name : null;
