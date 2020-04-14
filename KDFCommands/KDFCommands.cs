@@ -5,7 +5,6 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Text.RegularExpressions;
-using Microsoft.VisualBasic;
 using TS3AudioBot;
 using TS3AudioBot.Audio;
 using TS3AudioBot.CommandSystem;
@@ -415,10 +414,9 @@ public class KDFCommands : IBotPlugin {
 		return indices;
 	}
 
-	private static SortedSet<int> parseAndMap(PlaylistManager playlistManager, string indicesString)
-	{
+	private static SortedSet<int> parseAndMap(PlaylistManager playlistManager, string indicesString) {
 		var queue = playlistManager.CurrentList;
-		return ParseIndicesInBounds(indicesString, 1, queue.Items.Count - playlistManager.Index - 1);
+		return new SortedSet<int>(ParseIndicesInBounds(indicesString, 1, queue.Items.Count - playlistManager.Index - 1).Select(entry => entry + playlistManager.Index));
 	}
 
 	[Command("del")]
