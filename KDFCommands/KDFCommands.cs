@@ -165,9 +165,9 @@ public class KDFCommands : IBotPlugin {
 					builder.Append(" <Playlist: ").Append(data.PlaylistId).Append(">");
 				ts3Client.ChangeDescription(builder.ToString()).UnwrapThrow();
 			}
-				Thread.Sleep(1000);
-			}
+			Thread.Sleep(1000);
 		}
+	}
 
 	private static string GetClientNameFromUid(TsFullClient ts3FullClient, Uid? id) {
 		return id.HasValue ? ts3FullClient.GetClientNameFromUid(id.Value).Value.Name : null;
@@ -606,16 +606,16 @@ public class KDFCommands : IBotPlugin {
 			if (!playManager.IsPlaying)
 				throw new CommandException("There is not song currently playing.",
 					CommandExceptionReason.CommandError);
-			count = Tools.Clamp(countOpt.GetValueOrDefault(1), 0, queue.Items.Count - queue.Index - 1);
+			count = Tools.Clamp(countOpt.GetValueOrDefault(1), 0, queue.Items.Count - queue.Index);
 			for (int i = 0; i < count; i++) {
-				if (invoker.ClientUid == queue.Items[queue.Index].MetaData.ResourceOwnerUid ||
-				    info.HasRights(RightSkipOther)) { } else {
+				if (invoker.ClientUid != queue.Items[queue.Index].MetaData.ResourceOwnerUid &&
+				    !info.HasRights(RightSkipOther)) {
 					throw new CommandException($"You have no permission to skip song {i}.",
 						CommandExceptionReason.CommandError);
 				}
 			}
 
-			playManager.Skip(count);
+			playManager.Next(count).UnwrapThrow();
 		}
 
 		return $"Skipped {count} songs.";
@@ -783,8 +783,12 @@ public class KDFCommands : IBotPlugin {
 	}
 
 	public void Dispose() {
+<<<<<<< Updated upstream
 		playManager.AfterResourceStarted -= ResourceStarted;
 		playManager.PlaybackStopped -= PlaybackStopped;
+=======
+		playManager.AfterResourceStarted -= StartRessource;
+>>>>>>> Stashed changes
 
 		running = false;
 		descThread.Join();
