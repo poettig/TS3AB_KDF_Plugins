@@ -763,16 +763,8 @@ public class KDFCommands : IBotPlugin {
 	[Command("fillvoid")]
 	public string CommandFillVoid() {
 		if (fillVoid) {
-			return "Filling the void is enabled.";
-		} else {
-			return "Filling the void is disabled.";
-		}
-	}
-
-	[Command("fillvoid on")]
-	public string CommandFillVoidOn() {
-		if (fillVoid) {
-			return "Filling the void is already enabled.";
+			fillVoid = false;
+			return "Filling the void is now disabled."
 		} else {
 			if (PlayRandom()) {
 				fillVoid = true;
@@ -780,19 +772,9 @@ public class KDFCommands : IBotPlugin {
 			} else {
 				throw new CommandException("Can't fill the void :(", CommandExceptionReason.CommandError);
 			}
+			return "Filling the void is now enabled.";
 		}
 	}
-
-	[Command("fillvoid off")]
-	public string CommandFillVoidOff() {
-		if (!fillVoid) {
-			return "Filling the void is already disabled.";
-		} else {
-			fillVoid = false;
-			return "Filling the void disabled.";
-		}
-	}
-
 
 	public static class VotableCommands {
 		public abstract class AVotableCommand {
