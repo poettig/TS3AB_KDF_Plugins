@@ -783,12 +783,8 @@ public class KDFCommands : IBotPlugin {
 	}
 
 	public void Dispose() {
-<<<<<<< Updated upstream
 		playManager.AfterResourceStarted -= ResourceStarted;
 		playManager.PlaybackStopped -= PlaybackStopped;
-=======
-		playManager.AfterResourceStarted -= StartRessource;
->>>>>>> Stashed changes
 
 		running = false;
 		descThread.Join();
