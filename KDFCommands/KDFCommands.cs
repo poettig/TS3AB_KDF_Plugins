@@ -273,6 +273,11 @@ public class KDFCommands : IBotPlugin {
 			"." + (truncated ? TRUNCATED_MESSAGE : "");
 	}
 
+	public static void SendMessage(Ts3Client client, ClientCall cc, string message) {
+		if(cc.ClientId.HasValue)
+			client.SendMessage(message, cc.ClientId.Value);
+	}
+
 	[Command("youtube")]
 	public static void CommandYoutube(
 		PlayManager playManager,
@@ -284,8 +289,7 @@ public class KDFCommands : IBotPlugin {
 		Ts3Client ts3Client,
 		string message) {
 		string[] parts = Regex.Split(message, ";+");
-		ts3Client.SendMessage("Received your request to add " + parts.Length + " songs, processing...",
-			cc.ClientId.Value);
+		SendMessage(ts3Client, cc, "Received your request to add " + parts.Length + " songs, processing...");
 
 		PartHandler urlHandler = AddUrl;
 		PartHandler queryHandler = AddQuery;
@@ -325,9 +329,7 @@ public class KDFCommands : IBotPlugin {
 		PlayQueue queue = playManager.Queue;
 		int realIndex = queue.Items.Count - 1;
 		int index = realIndex - queue.Index;
-		ts3Client.SendMessage(
-			"Added '" + queue.Items[realIndex].AudioResource.ResourceTitle + "' at queue position " + index,
-			cc.ClientId.Value); // This will fail if async
+		SendMessage(ts3Client, cc, "Added '" + queue.Items[realIndex].AudioResource.ResourceTitle + "' at queue position " + index); // This will fail if async
 	}
 
 	private static void AddUrl(
@@ -377,9 +379,7 @@ public class KDFCommands : IBotPlugin {
 		string listId,
 		string message) {
 		string[] parts = Regex.Split(message, ";+");
-		ts3Client.SendMessage(
-			"Received your request to add " + parts.Length + " songs to the playlist '" + listId + "', processing...",
-			cc.ClientId.Value);
+		SendMessage(ts3Client, cc, "Received your request to add " + parts.Length + " songs to the playlist '" + listId + "', processing...");
 
 		PartHandler urlHandler = ListAddUrl;
 		PartHandler queryHandler = ListAddQuery;
@@ -400,17 +400,17 @@ public class KDFCommands : IBotPlugin {
 		try {
 			MainCommands.CommandListAddInternal(resolver, playlistManager, info, target, url);
 		} catch (CommandException e) {
-			ts3Client.SendMessage("Error occured for '" + url + "': " + e.Message, cc.ClientId.Value);
+			SendMessage(ts3Client, cc, "Error occured for '" + url + "': " + e.Message);
 			return;
 		}
 
 		IReadOnlyPlaylist
 			playlist = playlistManager.LoadPlaylist(target).Value; // No unwrap needed, playlist exists if code got here
 		int index = playlist.Items.Count - 1;
-		ts3Client.SendMessage(
+		SendMessage(ts3Client, cc,
 			"Added '" + GetTitleAtIndex(playlist, index) +
 			"' to playlist '" + target +
-			"' at position " + index, cc.ClientId.Value
+			"' at position " + index
 		);
 	}
 
@@ -430,7 +430,7 @@ public class KDFCommands : IBotPlugin {
 			try {
 				MainCommands.ListAddItem(playlistManager, info, target, audioResource);
 			} catch (CommandException e) {
-				ts3Client.SendMessage("Error occured for + '" + query + "': " + e.Message, cc.ClientId.Value);
+				SendMessage(ts3Client, cc, "Error occured for + '" + query + "': " + e.Message);
 				return;
 			}
 
@@ -438,11 +438,11 @@ public class KDFCommands : IBotPlugin {
 				playlist = playlistManager.LoadPlaylist(target)
 					.Value; // No unwrap needed, playlist exists if code got here
 			int index = playlist.Items.Count - 1;
-			ts3Client.SendMessage(
+			SendMessage(ts3Client, cc,
 				"Added '" + audioResource.ResourceTitle +
 				"' for your request '" + query +
 				"' to playlist '" + target +
-				"' at position " + index, cc.ClientId.Value
+				"' at position " + index
 			);
 		}
 	}
@@ -541,7 +541,7 @@ public class KDFCommands : IBotPlugin {
 			}
 		}
 
-		ts3Client.SendMessage(output.ToString(), cc.ClientId.Value);
+		SendMessage(ts3Client, cc, output.ToString());
 	}
 
 	[Command("queue")]
@@ -604,7 +604,7 @@ public class KDFCommands : IBotPlugin {
 		int count;
 		lock (playManager.Lock) {
 			if (!playManager.IsPlaying)
-				throw new CommandException("There is not song currently playing.",
+				throw new CommandException("There is no song currently playing.",
 					CommandExceptionReason.CommandError);
 			count = Tools.Clamp(countOpt.GetValueOrDefault(1), 0, queue.Items.Count - queue.Index);
 			for (int i = 0; i < count; i++) {
@@ -646,7 +646,7 @@ public class KDFCommands : IBotPlugin {
 				CommandExceptionReason.CommandError);
 		}
 
-		AudioResource resource = null;
+		AudioResource resource;
 
 		// Check if URL
 		string query = message.Replace("[URL]", "").Replace("[/URL]", "").Trim(' ');
