@@ -35,6 +35,10 @@ compileBot() {
 	echo "---------------------------------------------------"
 }
 
+if [ "$1" == "-f" ]; then
+	force=1
+fi
+
 # Recompile the bot
 echo -e "\033[1;33mRecompiling the bot...\033[0m"
 if ! [ -d TS3AudioBot ]; then
@@ -44,7 +48,7 @@ if ! [ -d TS3AudioBot ]; then
 else
 	cd TS3AudioBot || error "Failed to cd into the bot repository."
 
-	if ! isGitUpToDate; then
+	if [ "$force" ] || ! isGitUpToDate; then
 		compileBot
 	else
 		cd ..

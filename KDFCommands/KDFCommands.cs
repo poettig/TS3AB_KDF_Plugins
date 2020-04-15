@@ -71,8 +71,11 @@ public class KDFCommands : IBotPlugin {
 
 	private Player player;
 	private PlayManager playManager;
+	private PlaylistManager playlistManager;
 	private Ts3Client ts3Client;
 	private TsFullClient ts3FullClient;
+
+	private bool fillVoid = false;
 
 	public KDFCommands(
 		Player player,
@@ -83,6 +86,7 @@ public class KDFCommands : IBotPlugin {
 		CommandManager commandManager) {
 		this.player = player;
 		this.playManager = playManager;
+		this.playlistManager = playlistManager;
 		this.ts3Client = ts3Client;
 		this.ts3FullClient = ts3FullClient;
 		this.running = false;
@@ -91,7 +95,8 @@ public class KDFCommands : IBotPlugin {
 	}
 
 	public void Initialize() {
-		playManager.AfterResourceStarted += StartRessource;
+		playManager.AfterResourceStarted += ResourceStarted;
+		playManager.PlaybackStopped += PlaybackStopped;
 
 		descThread = new Thread(DescriptionUpdater);
 		descThread.IsBackground = true;
@@ -99,11 +104,49 @@ public class KDFCommands : IBotPlugin {
 		descThread.Start();
 	}
 
-	private void StartRessource(object sender, PlayInfoEventArgs e) {
+	private void ResourceStarted(object sender, PlayInfoEventArgs e) {
 		descriptionThreadData = new DescriptionThreadData(
 			e.ResourceData.ResourceTitle, 
 			e.MetaData.ContainingPlaylistId, 
 			GetClientNameFromUid(ts3FullClient, e.PlayResource.Meta.ResourceOwnerUid));
+	}
+
+	private void PlaybackStopped(object sender, EventArgs e) {
+		if (playManager.Queue.Items.Count == playManager.Queue.Index && fillVoid) {
+			if (ts3Client.IsDefinitelyAlone() || !PlayRandom()) {
+				fillVoid = false;
+			}
+		}
+	}
+
+	private bool PlayRandom() {
+		// Play random song from random playlist
+
+		// Get total number of songs
+		int numSongs = 0;
+		List<(string, IReadOnlyPlaylist)> playlists = new List<(string, IReadOnlyPlaylist)>();
+		foreach (string playlistId in playlistManager.GetAvailablePlaylists().UnwrapThrow().Select(entry => entry.Id)) {
+			IReadOnlyPlaylist playlist = playlistManager.LoadPlaylist(playlistId).UnwrapThrow();
+			playlists.Add((playlistId, playlist));
+			numSongs += playlist.Items.Count;
+		}
+
+		// Draw random song number
+		int songIndex = new Random().Next(0, numSongs);
+
+		// Find the randomized song
+		foreach ((string playlistId, IReadOnlyPlaylist playlist) in playlists) {
+			if (songIndex < playlist.Items.Count) {
+				// Song is in this playlist
+				playManager.Enqueue(playlist[songIndex].AudioResource, new MetaData(ts3FullClient.Identity.ClientUid, playlistId)).UnwrapThrow();
+				return true;
+			} else {
+				// Song is in another playlist
+				songIndex -= playlist.Items.Count;
+			}
+		}
+
+		return false;
 	}
 
 	private void DescriptionUpdater() {
@@ -128,6 +171,10 @@ public class KDFCommands : IBotPlugin {
 
 	private static string GetClientNameFromUid(TsFullClient ts3FullClient, Uid? id) {
 		return id.HasValue ? ts3FullClient.GetClientNameFromUid(id.Value).Value.Name : null;
+	}
+
+	private static string GetPlaylistIdAtIndex(PlayQueue queue, int index) {
+		return queue.Items[index].MetaData.ContainingPlaylistId;
 	}
 
 	private static string GetTitleAtIndex(PlayQueue queue, int index) {
@@ -167,6 +214,11 @@ public class KDFCommands : IBotPlugin {
 		int count = 1;
 		int numPlaylists = parts.Length;
 		if (Int32.TryParse(parts[parts.Length - 1], out int countOutput)) {
+			// The only element is a number --> playlist name missing
+			if (parts.Length == 1) {
+				throw new CommandException("No playlist to add from given.", CommandExceptionReason.CommandError);
+			}
+
 			count = countOutput;
 			numPlaylists--;
 
@@ -313,7 +365,7 @@ public class KDFCommands : IBotPlugin {
 		}
 	}
 
-	[Command("list youtube add")]
+	[Command("list add")]
 	public static void CommandListYoutube(
 		PlayManager playManager,
 		PlaylistManager playlistManager,
@@ -514,17 +566,27 @@ public class KDFCommands : IBotPlugin {
 
 		string output = "";
 		if (playManager.IsPlaying) {
-			output += "Current song: " + GetTitleAtIndex(queue, playManager.Queue.Index) + " - " +
-			          GetNameAtIndex(queue, queue.Index, ts3FullClient);
+			output +=
+				"Current song: " + GetTitleAtIndex(queue, playManager.Queue.Index) +
+				" - " + GetNameAtIndex(queue, queue.Index, ts3FullClient) +
+			   	" <Playlist: " + GetPlaylistIdAtIndex(queue, playManager.Queue.Index) +
+			   	">";
 		}
 
 		for (int i = queue.Index + 1; i < queue.Items.Count; i++) {
 			if (printAll || queue.Items[i].MetaData.ResourceOwnerUid == invoker.ClientUid) {
-				output += "\n[" + (i - queue.Index) + "] " + GetTitleAtIndex(queue, i) + " - " +
-				          GetNameAtIndex(queue, i, ts3FullClient);
+				output +=
+					"\n[" + (i - queue.Index) +
+					"] " + GetTitleAtIndex(queue, i) +
+					" - " + GetNameAtIndex(queue, i, ts3FullClient) +
+					" <Playlist: " + GetPlaylistIdAtIndex(queue, playManager.Queue.Index) +
+					">";
 			} else {
-				output += "\n[" + (i - queue.Index) + "] Hidden Song Name - " +
-				          GetNameAtIndex(queue, i, ts3FullClient);
+				output +=
+					"\n[" + (i - queue.Index) +
+					"] Hidden Song Name - " + GetNameAtIndex(queue, i, ts3FullClient) +
+					" <Playlist: " + GetPlaylistIdAtIndex(queue, playManager.Queue.Index) +
+					">";
 			}
 		}
 
@@ -687,9 +749,42 @@ public class KDFCommands : IBotPlugin {
 		return $"Queued {items.Count} items from playlist {plist.Title}.";
 	}
 
+	[Command("fillvoid")]
+	public string CommandFillVoid() {
+		if (fillVoid) {
+			return "Filling the void is enabled.";
+		} else {
+			return "Filling the void is disabled.";
+		}
+	}
+
+	[Command("fillvoid on")]
+	public string CommandFillVoidOn() {
+		if (fillVoid) {
+			return "Filling the void is already enabled.";
+		} else {
+			if (PlayRandom()) {
+				fillVoid = true;
+				return "Filling the void enabled.";
+			} else {
+				throw new CommandException("Can't fill the void :(", CommandExceptionReason.CommandError);
+			}
+		}
+	}
+
+	[Command("fillvoid off")]
+	public string CommandFillVoidOff() {
+		if (!fillVoid) {
+			return "Filling the void is already disabled.";
+		} else {
+			fillVoid = false;
+			return "Filling the void disabled.";
+		}
+	}
+
 	public void Dispose() {
-		playManager.AfterResourceStarted -= Start;
-		playManager.ResourceStopped -= Stop;
+		playManager.AfterResourceStarted -= ResourceStarted;
+		playManager.PlaybackStopped -= PlaybackStopped;
 
 		running = false;
 		descThread.Join();
