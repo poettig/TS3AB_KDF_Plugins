@@ -764,7 +764,7 @@ public class KDFCommands : IBotPlugin {
 	public string CommandFillVoid() {
 		if (fillVoid) {
 			fillVoid = false;
-			return "Filling the void is now disabled."
+			return "Filling the void is now disabled.";
 		} else {
 			if (PlayRandom()) {
 				fillVoid = true;
