@@ -935,9 +935,6 @@ public class KDFCommands : IBotPlugin {
 			throw new CommandException("VoteData could not be found", CommandExceptionReason.InternalError);
 ;
 		if (voteData.CurrentVotes.TryGetValue(command, out var currentVote)) {
-			if (currentVote.Command != command)
-				throw new CommandException("There is already a vote going on", CommandExceptionReason.CommandError);
-
 			if(!string.IsNullOrWhiteSpace(args))
 				throw new CommandException("There is already a vote going on for this command. You can't start another vote for the same command with other parameters right now.", CommandExceptionReason.CommandError);
 
