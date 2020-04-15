@@ -90,7 +90,7 @@ public class KDFCommands : IBotPlugin {
 		this.ts3Client = ts3Client;
 		this.ts3FullClient = ts3FullClient;
 		this.running = false;
-
+		playManager.OnPlaybackEnded();
 		commandManager.RegisterCollection(Bag);
 	}
 
