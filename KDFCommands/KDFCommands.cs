@@ -9,18 +9,23 @@ using TS3AudioBot;
 using TS3AudioBot.Audio;
 using TS3AudioBot.CommandSystem;
 using TS3AudioBot.CommandSystem.Text;
+using TS3AudioBot.Config;
+using TS3AudioBot.Dependency;
 using TS3AudioBot.Plugins;
 using TS3AudioBot.Playlists;
 using TS3AudioBot.ResourceFactories;
 using TS3AudioBot.Helper;
-using TS3AudioBot.Rights;
+using TS3AudioBot.Localization;
 using TS3AudioBot.Sessions;
 using TS3AudioBot.Web.Api;
 using TSLib;
 using TSLib.Full;
+using TSLib.Full.Book;
 using TSLib.Helper;
 
 public class KDFCommands : IBotPlugin {
+	private static readonly NLog.Logger Log = NLog.LogManager.GetCurrentClassLogger(); // TODO this does not get printed
+
 	internal static ICommandBag Bag { get; } = new CommandsBag();
 
 	internal class CommandsBag : ICommandBag {
@@ -40,6 +45,8 @@ public class KDFCommands : IBotPlugin {
 	public const string RightDeleteOther = "del.other";
 	public const string RightSkipOther = "skip.other";
 	public const string RightOverrideQueueCommandCheck = "queue.view.full";
+
+	private static readonly TimeSpan MinIdleTimeForVoteIgnore = TimeSpan.FromMinutes(10);
 
 	private delegate void PartHandler(
 		PlaylistManager playlistManager,
@@ -83,7 +90,8 @@ public class KDFCommands : IBotPlugin {
 		PlaylistManager playlistManager,
 		Ts3Client ts3Client,
 		TsFullClient ts3FullClient,
-		CommandManager commandManager) {
+		CommandManager commandManager,
+		BotInjector injector) {
 		this.player = player;
 		this.playManager = playManager;
 		this.playlistManager = playlistManager;
@@ -92,6 +100,10 @@ public class KDFCommands : IBotPlugin {
 		this.running = false;
 		playManager.OnPlaybackEnded();
 		commandManager.RegisterCollection(Bag);
+
+		if (!injector.TryGet<VoteData>(out _)) {
+			injector.AddModule(new VoteData());
+	}
 	}
 
 	public void Initialize() {
@@ -779,6 +791,193 @@ public class KDFCommands : IBotPlugin {
 		} else {
 			fillVoid = false;
 			return "Filling the void disabled.";
+		}
+	}
+
+
+	public static class VotableCommands {
+		public abstract class AVotableCommand {
+			public static E<LocalStr> AreEmpty(string args) {
+				if (string.IsNullOrEmpty(args))
+					return R.Ok;
+				return new LocalStr("This command can only be voted without arguments");
+			}
+
+			public static E<LocalStr> AreNotEmpty(string args) {
+				if (!string.IsNullOrEmpty(args))
+					return R.Ok;
+				return new LocalStr("This command can't be voted without arguments");
+			}
+
+			public abstract Func<string> Create(ExecutionInformation info, string command, string args);
+		}
+
+		public static string ExecuteCommandWithArgs(ExecutionInformation info, string command, string args) {
+			StringBuilder builder = new StringBuilder();
+			builder.Append("!").Append(command);
+			if (args != null)
+				builder.Append(' ').Append(args);
+			return CommandManager.ExecuteCommand(info, builder.ToString());
+		}
+
+		public static readonly Dictionary<string, AVotableCommand> Commands = new Dictionary<string, AVotableCommand>(
+			new[] {
+				new KeyValuePair<string, AVotableCommand>("pause", EmptyArgsCommand.Instance),
+				new KeyValuePair<string, AVotableCommand>("previous", EmptyArgsCommand.Instance),
+				new KeyValuePair<string, AVotableCommand>("stop", EmptyArgsCommand.Instance),
+				new KeyValuePair<string, AVotableCommand>("clear", EmptyArgsCommand.Instance),
+				new KeyValuePair<string, AVotableCommand>("front", FrontCommand.Instance),
+				new KeyValuePair<string, AVotableCommand>("skip", SkipCommand.Instance),
+			});
+
+		public class EmptyArgsCommand : AVotableCommand {
+			public override Func<string> Create(ExecutionInformation info, string command, string args) {
+				AreEmpty(args).UnwrapThrow();
+				return () => ExecuteCommandWithArgs(info, command, args);
+			}
+			private EmptyArgsCommand() {}
+			public static AVotableCommand Instance { get; } = new EmptyArgsCommand();
+		}
+
+		public class SkipCommand : AVotableCommand {
+			public override Func<string> Create(ExecutionInformation info, string command, string args) {
+				if (!string.IsNullOrWhiteSpace(args) && !int.TryParse(args, out _))
+					throw new CommandException("Skip expects no parameters or a number", CommandExceptionReason.CommandError);
+				return () => ExecuteCommandWithArgs(info, command, args);
+			}
+			private SkipCommand() {}
+			public static AVotableCommand Instance { get; } = new SkipCommand();
+		}
+		public class FrontCommand : AVotableCommand {
+			public override Func<string> Create(ExecutionInformation info, string command, string args) {
+				AreNotEmpty(args).UnwrapThrow();
+				return () => ExecuteCommandWithArgs(info, command, args);
+			}
+			private FrontCommand() {}
+			public static AVotableCommand Instance { get; } = new FrontCommand();
+		}
+	}
+
+	public static string ExecuteTryCatch(ConfBot config, bool answer, Func<string> action, Action<string> errorHandler) {
+		try {
+			return action();
+		} catch (CommandException ex) {
+			NLog.LogLevel commandErrorLevel = answer ? NLog.LogLevel.Debug : NLog.LogLevel.Warn;
+			Log.Log(commandErrorLevel, ex, "Command Error ({0})", ex.Message);
+			if (answer) {
+				errorHandler(TextMod.Format(config.Commands.Color,
+					"Error: {0}".Mod().Color(Color.Red).Bold(),
+					ex.Message));
+			}
+		} catch (Exception ex) {
+			Log.Error(ex, "Unexpected command error: {0}", ex.UnrollException());
+			if (answer) {
+				errorHandler(TextMod.Format(config.Commands.Color,
+						"An unexpected error occured: {0}".Mod().Color(Color.Red).Bold(), ex.Message));
+			}
+		}
+
+		return null;
+	}
+
+	private class CurrentVoteData {
+		public string Command { get; }
+		public Func<string> Executor { get; }
+		public int Needed { get; }
+		public HashSet<Uid> Voters { get; } = new HashSet<Uid>();
+		public CurrentVoteData(string command, int clientCount, Func<string> executor) {
+			Command = command;
+			Needed = Math.Max(clientCount / 2, 1);
+			Executor = executor;
+		}
+
+		public bool CheckAndFire(Ts3Client client, ConfBot config) {
+			if (Needed <= Voters.Count) {
+				client.SendChannelMessage($"Enough votes, executing \"{Command}\"...");
+				
+				var res = ExecuteTryCatch(config, true, Executor, err => client.SendChannelMessage(err).UnwrapToLog(Log));
+				if (!string.IsNullOrEmpty(res))
+					client.SendChannelMessage(res).UnwrapToLog(Log);
+
+				return true;
+			}
+
+			return false;
+		}
+	}
+
+	private class VoteData {
+		public Dictionary<string, CurrentVoteData> CurrentVotes { get; } = new Dictionary<string, CurrentVoteData>();
+	}
+
+	private static E<int> CountClientsInChannel(TsFullClient client, ChannelId channel, Func<Client, bool> predicate) {
+		return client.Book.Clients.Values.Count(c => c.Channel == channel && predicate(c));
+	}
+
+	[Command("vote")]
+	public static string CommandStartVote(TsFullClient ts3FullClient, Ts3Client ts3Client, BotInjector injector, ExecutionInformation info, ClientCall invoker, ConfBot config, string command, string? args = null) {
+		
+		var userChannel = invoker.ChannelId;
+		if(!userChannel.HasValue)
+			throw new CommandException("Could not get user channel", CommandExceptionReason.InternalError);
+		var botChannel = ts3FullClient.Book.Clients[ts3FullClient.ClientId].Channel;
+
+		if(botChannel != userChannel.Value)
+			throw new CommandException("You have to be in the same channel as the bot to use votes", CommandExceptionReason.CommandError);
+
+		command = command.ToLower();
+		if (string.IsNullOrWhiteSpace(command))
+			throw new CommandException("No command to vote for given", CommandExceptionReason.CommandError);
+		
+		if(!VotableCommands.Commands.TryGetValue(command, out var votableCommand)) 
+			throw new CommandException($"The given command \"{command}\" can't be voted for", CommandExceptionReason.CommandError);
+
+		if (!injector.TryGet<VoteData>(out var voteData))
+			throw new CommandException("VoteData could not be found", CommandExceptionReason.InternalError);
+;
+		if (voteData.CurrentVotes.TryGetValue(command, out var currentVote)) {
+			if (currentVote.Command != command)
+				throw new CommandException("There is already a vote going on", CommandExceptionReason.CommandError);
+
+			if(!string.IsNullOrWhiteSpace(args))
+				throw new CommandException("There is already a vote going on for this command. You can't start another vote for the same command with other parameters right now.", CommandExceptionReason.CommandError);
+
+			if (currentVote.Voters.Remove(invoker.ClientUid)) {
+				int count = currentVote.Voters.Count;
+				if (count == 0) {
+					voteData.CurrentVotes.Remove(command);
+					return $"Removed your vote for \"{command}\" and stopped the vote";
+				} else {
+					return $"Removed your vote for \"{command}\" ({count} votes of {currentVote.Needed})";
+				}
+			} else {
+				currentVote.Voters.Add(invoker.ClientUid);
+				if (currentVote.CheckAndFire(ts3Client, config))
+					voteData.CurrentVotes.Remove(currentVote.Command);
+				return $"Added your vote for \"{command}\" ({currentVote.Voters.Count} votes of {currentVote.Needed})";
+			}
+		} else {
+			var ci = new CallerInfo(false) {SkipRightsChecks = true, CommandComplexityMax = config.Commands.CommandComplexity};
+
+			bool CheckClient(Client client) {
+				if (ts3FullClient.ClientId == client.Id) // exclude bot
+					return false;
+				if (client.OutputMuted) // exclude muted
+					return false;
+				
+				var data = ts3Client.GetClientInfoById(client.Id);
+				bool r = !data.Ok || data.Value.ClientIdleTime < MinIdleTimeForVoteIgnore;
+				return !data.Ok || data.Value.ClientIdleTime < MinIdleTimeForVoteIgnore; // include if data not ok or not long enough idle
+			}
+
+			int clientCount = CountClientsInChannel(ts3FullClient, botChannel, CheckClient);
+			info.AddModule(ci);
+			currentVote = new CurrentVoteData(command, clientCount, votableCommand.Create(info, command, args));
+			voteData.CurrentVotes.Add(command, currentVote);
+			currentVote.Voters.Add(invoker.ClientUid);
+			if (currentVote.CheckAndFire(ts3Client, config))
+				voteData.CurrentVotes.Remove(currentVote.Command);
+			return $"Vote for \"{command}\" started, added your vote ({currentVote.Voters.Count} votes of {currentVote.Needed})";
 		}
 	}
 
