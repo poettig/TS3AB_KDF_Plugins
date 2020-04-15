@@ -163,7 +163,7 @@ public class KDFCommands : IBotPlugin {
 
 	private void DescriptionUpdater() {
 		while (running) {
-			if (playManager.IsPlaying) {
+			if (playManager.IsPlaying && descriptionThreadData != null) {
 				var data = descriptionThreadData;
 				int queueLength = playManager.Queue.Items.Count - playManager.Queue.Index - 1;
 				TimeSpan timeLeftTS = player.Length.Subtract(player.Position);
@@ -597,8 +597,7 @@ public class KDFCommands : IBotPlugin {
 				output +=
 					"\n[" + (i - queue.Index) +
 					"] Hidden Song Name - " + GetNameAtIndex(queue, i, ts3FullClient) +
-					" <Playlist: " + GetPlaylistIdAtIndex(queue, playManager.Queue.Index) +
-					">";
+					" <Playlist: Hidden>";
 			}
 		}
 

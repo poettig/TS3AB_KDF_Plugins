@@ -29,7 +29,7 @@ compileBot() {
 	git pull || error "Failed to pull repository."
 	sed -i -e '/GitVersionTask/,+3d' TS3AudioBot/TS3AudioBot.csproj # Fix bug in master with GitVersionTask
 	dotnet build --framework netcoreapp3.1 --configuration Release TS3AudioBot || error "Compilation of TS3AudioBot failed."
-	rsync -a --progress TS3AudioBot/bin/Release/netcoreapp3.1/ ../../ || error "RSync failed."
+	rsync -a --progress --exclude=NLog.config TS3AudioBot/bin/Release/netcoreapp3.1/ ../../ || error "RSync failed."
 	cd ..
 	echo -e "\033[1;33mFinished building the bot!\033[0m"
 	echo "---------------------------------------------------"
