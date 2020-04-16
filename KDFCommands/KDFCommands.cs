@@ -185,19 +185,24 @@ public class KDFCommands : IBotPlugin {
 		return id.HasValue ? ts3FullClient.GetClientNameFromUid(id.Value).Value.Name : null;
 	}
 
-	private static string GetPlaylistIdAtIndex(PlayQueue queue, int index) {
+	private static bool HasPlaylistId(PlayQueue queue, int index) {
+		string listId = queue.Items[index].MetaData.ContainingPlaylistId;
+		return listId != null && listId != "";
+	}
+
+	private static string GetPlaylistId(PlayQueue queue, int index) {
 		return queue.Items[index].MetaData.ContainingPlaylistId;
 	}
 
-	private static string GetTitleAtIndex(PlayQueue queue, int index) {
+	private static string GetTitle(PlayQueue queue, int index) {
 		return queue.Items[index].AudioResource.ResourceTitle;
 	}
 
-	private static string GetTitleAtIndex(IReadOnlyPlaylist queue, int index) {
+	private static string GetTitle(IReadOnlyPlaylist queue, int index) {
 		return queue.Items[index].AudioResource.ResourceTitle;
 	}
 
-	private static string GetNameAtIndex(PlayQueue queue, int index, TsFullClient ts3FullClient) {
+	private static string GetName(PlayQueue queue, int index, TsFullClient ts3FullClient) {
 		return GetClientNameFromUid(ts3FullClient, queue.Items[index].MetaData.ResourceOwnerUid);
 	}
 
@@ -420,7 +425,7 @@ public class KDFCommands : IBotPlugin {
 			playlist = playlistManager.LoadPlaylist(target).Value; // No unwrap needed, playlist exists if code got here
 		int index = playlist.Items.Count - 1;
 		SendMessage(ts3Client, cc,
-			"Added '" + GetTitleAtIndex(playlist, index) +
+			"Added '" + GetTitle(playlist, index) +
 			"' to playlist '" + target +
 			"' at position " + index
 		);
@@ -579,25 +584,29 @@ public class KDFCommands : IBotPlugin {
 		string output = "";
 		if (playManager.IsPlaying) {
 			output +=
-				"Current song: " + GetTitleAtIndex(queue, playManager.Queue.Index) +
-				" - " + GetNameAtIndex(queue, queue.Index, ts3FullClient) +
-			   	" <Playlist: " + GetPlaylistIdAtIndex(queue, playManager.Queue.Index) +
-			   	">";
+				"Current song: " + GetTitle(queue, queue.Index) +
+				" - " + GetName(queue, queue.Index, ts3FullClient);
+			if (HasPlaylistId(queue, queue.Index)) {
+			   	output += " <Playlist: " + GetPlaylistId(queue, queue.Index) + ">";
+			}
 		}
 
 		for (int i = queue.Index + 1; i < queue.Items.Count; i++) {
 			if (printAll || queue.Items[i].MetaData.ResourceOwnerUid == invoker.ClientUid) {
 				output +=
 					"\n[" + (i - queue.Index) +
-					"] " + GetTitleAtIndex(queue, i) +
-					" - " + GetNameAtIndex(queue, i, ts3FullClient) +
-					" <Playlist: " + GetPlaylistIdAtIndex(queue, playManager.Queue.Index) +
-					">";
+					"] " + GetTitle(queue, i) +
+					" - " + GetName(queue, i, ts3FullClient);
+				if (HasPlaylistId(queue, i)) {
+					output += " <Playlist: " + GetPlaylistId(queue, i) + ">";
+				}
 			} else {
 				output +=
 					"\n[" + (i - queue.Index) +
-					"] Hidden Song Name - " + GetNameAtIndex(queue, i, ts3FullClient) +
-					" <Playlist: Hidden>";
+					"] Hidden Song Name - " + GetName(queue, i, ts3FullClient);
+				if (HasPlaylistId(queue, i)) {
+					output += " <Playlist: Hidden>";
+				}
 			}
 		}
 
