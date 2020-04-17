@@ -37,7 +37,6 @@ public class KDFCommands : IBotPlugin {
 
 	private const string YOUTUBE_URL_REGEX =
 		"^(?:https?:\\/\\/)(?:www\\.)?(?:youtube\\.com\\/watch\\?v=(.*?)(?:&.*)*|youtu\\.be\\/(.*?)\\??.*)$";
-
 	private const string TRUNCATED_MESSAGE =
 		"\nThe number of songs to add was reduced compared to your request.\n" +
 		"This can happen because the requested number of songs was not evenly divisible by the number of playlists " +
@@ -68,7 +67,6 @@ public class KDFCommands : IBotPlugin {
 		public string Title { get; }
 		public string PlaylistId { get; }
 		public string Username { get; }
-
 		public DescriptionThreadData(string title, string playlistId, string username) {
 			Title = title;
 			PlaylistId = playlistId;
@@ -84,16 +82,18 @@ public class KDFCommands : IBotPlugin {
 	private Ts3Client ts3Client;
 	private TsFullClient ts3FullClient;
 
-	private bool fillVoid = false;
+	private bool autofill = false;
+	private List<string> autofillFrom;
 
 	public KDFCommands(
-		Player player,
-		PlayManager playManager,
-		PlaylistManager playlistManager,
-		Ts3Client ts3Client,
-		TsFullClient ts3FullClient,
-		CommandManager commandManager,
-		BotInjector injector) {
+			Player player,
+			PlayManager playManager,
+			PlaylistManager playlistManager,
+			Ts3Client ts3Client,
+			TsFullClient ts3FullClient,
+			CommandManager commandManager,
+			BotInjector injector) {
+		
 		this.player = player;
 		this.playManager = playManager;
 		this.playlistManager = playlistManager;
@@ -120,48 +120,80 @@ public class KDFCommands : IBotPlugin {
 
 	private void ResourceStarted(object sender, PlayInfoEventArgs e) {
 		descriptionThreadData = new DescriptionThreadData(
-			e.ResourceData.ResourceTitle,
-			e.MetaData.ContainingPlaylistId,
+			e.ResourceData.ResourceTitle, 
+			e.MetaData.ContainingPlaylistId, 
 			GetClientNameFromUid(ts3FullClient, e.PlayResource.Meta.ResourceOwnerUid));
 	}
 
 	private void PlaybackStopped(object sender, EventArgs e) {
-		if (playManager.Queue.Items.Count == playManager.Queue.Index && fillVoid) {
-			if (ts3Client.IsDefinitelyAlone() || !PlayRandom()) {
-				fillVoid = false;
+		if (playManager.Queue.Items.Count == playManager.Queue.Index && autofill) {
+			if (!ts3Client.IsDefinitelyAlone()) {
+				var result = PlayRandom();
+				if (!result.Ok) {
+					ts3Client.SendChannelMessage("Could not play a new autofill song: " + result.Error.Str);
+				} else {
+					return;
+				}
 			}
+
+			DisableAutofill();
 		}
 	}
 
-	private bool PlayRandom() {
-		// Play random song from random playlist
+	private E<LocalStr> PlayRandom() {
+		// Play random song from a random playlist currently in the selected set
 
-		// Get total number of songs
-		int numSongs = 0;
-		List<(string, IReadOnlyPlaylist)> playlists = new List<(string, IReadOnlyPlaylist)>();
+		// Get total number of songs from all selected playlists
+		var numSongs = 0;
+		var playlists = new List<(string, IReadOnlyPlaylist)>();
 		foreach (string playlistId in playlistManager.GetAvailablePlaylists().UnwrapThrow().Select(entry => entry.Id)) {
-			IReadOnlyPlaylist playlist = playlistManager.LoadPlaylist(playlistId).UnwrapThrow();
+			if (autofillFrom != null && !autofillFrom.Contains(playlistId)) {
+				continue;
+			}
+
+			var playlist = playlistManager.LoadPlaylist(playlistId).UnwrapThrow();
 			playlists.Add((playlistId, playlist));
 			numSongs += playlist.Items.Count;
 		}
 
-		// Draw random song number
-		int songIndex = new Random().Next(0, numSongs);
+		var plId = "";
+		AudioResource resource = null;
+		for (var i = 0; i < 10; i++) {
+			// Draw random song number
+			var songIndex = new Random().Next(0, numSongs);
 
-		// Find the randomized song
-		foreach ((string playlistId, IReadOnlyPlaylist playlist) in playlists) {
-			if (songIndex < playlist.Items.Count) {
+			// Find the randomized song
+			foreach (var (playlistId, playlist) in playlists) {
 				// Song is in this playlist
-				playManager.Enqueue(playlist[songIndex].AudioResource,
-					new MetaData(ts3FullClient.Identity.ClientUid, playlistId)).UnwrapThrow();
-				return true;
-			} else {
+				if (songIndex < playlist.Items.Count) {
+					plId = playlistId;
+					resource = playlist[songIndex].AudioResource;
+					break;
+				}
+
 				// Song is in another playlist
 				songIndex -= playlist.Items.Count;
 			}
+
+			// Check if the song was already played in the last 250 songs, if not take this one.
+			// If items.count < 250, the subtraction is negative, meaning that j == 0 will be reached first
+			var foundDuplicate = false;
+			var items = playManager.Queue.Items;
+			if (items.Count > 0) {
+				for (var j = items.Count - 1; j != 0 && j >= items.Count - 250; j--) {
+					if (items[j].AudioResource.Equals(resource)) {
+						foundDuplicate = true;
+					}
+				}
+			}
+
+			if (!foundDuplicate) {
+				break;
+			}
 		}
 
-		return false;
+		// Play song
+		return playManager.Enqueue(resource, new MetaData(ts3FullClient.Identity.ClientUid, plId));
 	}
 
 	private void DescriptionUpdater() {
@@ -180,7 +212,6 @@ public class KDFCommands : IBotPlugin {
 					builder.Append(" <Playlist: ").Append(data.PlaylistId).Append(">");
 				ts3Client.ChangeDescription(builder.ToString()).UnwrapThrow();
 			}
-
 			Thread.Sleep(1000);
 		}
 	}
@@ -223,10 +254,11 @@ public class KDFCommands : IBotPlugin {
 
 	[Command("list rqueue")]
 	public static string CommandListRQueue(
-		PlaylistManager playlistManager,
-		PlayManager playManager,
-		InvokerData invoker,
-		string[] parts) {
+			PlaylistManager playlistManager,
+			PlayManager playManager,
+			InvokerData invoker,
+			string[] parts) {
+
 		bool truncated = false;
 
 		// Check if last element is a number.
@@ -243,11 +275,9 @@ public class KDFCommands : IBotPlugin {
 			numPlaylists--;
 
 			if (count < 0) {
-				throw new CommandException("You can't add a negative number of songs.",
-					CommandExceptionReason.CommandError);
+				throw new CommandException("You can't add a negative number of songs.", CommandExceptionReason.CommandError);
 			} else if (count == 0) {
-				throw new CommandException("Adding no songs doesn't make any sense.",
-					CommandExceptionReason.CommandError);
+				throw new CommandException("Adding no songs doesn't make any sense.", CommandExceptionReason.CommandError);
 			}
 		}
 
@@ -258,8 +288,7 @@ public class KDFCommands : IBotPlugin {
 		}
 
 		if (songsPerPlaylist == 0) {
-			throw new CommandException("You need to add least at one song per playlist.",
-				CommandExceptionReason.CommandError);
+				throw new CommandException("You need to add least at one song per playlist.", CommandExceptionReason.CommandError);
 		}
 
 		int numSongsAdded = 0;
@@ -273,9 +302,8 @@ public class KDFCommands : IBotPlugin {
 			if (numSongsToTake != songsPerPlaylist) {
 				truncated = true;
 			}
-
 			numSongsAdded += numSongsToTake;
-
+			
 			var meta = new MetaData(invoker.ClientUid, plistId);
 			Shuffle(items, new Random());
 			allItems.AddRange(items.Take(numSongsToTake).Select(item => new QueueItem(item.AudioResource, meta)));
@@ -288,7 +316,7 @@ public class KDFCommands : IBotPlugin {
 			startPos = playManager.Queue.Items.Count - playManager.Queue.Index;
 			playManager.Enqueue(allItems).UnwrapThrow();
 		}
-
+		
 		return
 			"Added a total of " + numSongsAdded +
 			" songs across " + numPlaylists +
@@ -518,8 +546,7 @@ public class KDFCommands : IBotPlugin {
 	}
 
 	private static SortedSet<int> parseAndMap(PlayQueue playQueue, string indicesString) {
-		return new SortedSet<int>(ParseIndicesInBounds(indicesString, 1, playQueue.Items.Count - playQueue.Index - 1)
-			.Select(entry => entry + playQueue.Index));
+		return new SortedSet<int>(ParseIndicesInBounds(indicesString, 1, playQueue.Items.Count - playQueue.Index - 1).Select(entry => entry + playQueue.Index));
 	}
 
 	[Command("del")]
@@ -751,15 +778,15 @@ public class KDFCommands : IBotPlugin {
 	[Command("list search add")]
 	public static string CommandSearchAdd(
 		ExecutionInformation info, UserSession session, PlaylistManager playlistManager, string listId) {
-		if (!session.Get<SearchListItemsResult>(SessionKeyListSearchResults, out var result)) {
+		if (!session.Get<List<(PlaylistItem, int)>>(SessionKeyListSearchResults, out var items)) {
 			throw new CommandException("No search results found.", CommandExceptionReason.CommandError);
 		}
 
 		playlistManager.ModifyPlaylist(listId, list => {
 			MainCommands.CheckPlaylistModifiable(list, info, "modify");
-			list.AddRange(result.Items.Select(item => item.Item1)).UnwrapThrow();
+			list.AddRange(items.Select(item => item.Item1)).UnwrapThrow();
 		}).UnwrapThrow();
-		return $"Added {result.Items.Count} items to {listId}.";
+		return $"Added {items.Count} items to {listId}.";
 	}
 
 	[Command("list item queue")]
@@ -773,25 +800,96 @@ public class KDFCommands : IBotPlugin {
 			items.Add(plist.Items[index]);
 		}
 
-		playManager.Enqueue(items.Select(item => item.AudioResource), new MetaData(invoker.ClientUid, listId))
-			.UnwrapThrow();
+		playManager.Enqueue(items.Select(item => item.AudioResource), new MetaData(invoker.ClientUid, listId)).UnwrapThrow();
 		return $"Queued {items.Count} items from playlist {plist.Title}.";
 	}
 
-	[Command("fillvoid")]
-	public string CommandFillVoid() {
-		if (fillVoid) {
-			fillVoid = false;
-			return "Filling the void is now disabled.";
+	private string AutofillStatus(string word) {
+		string result = "Autofill is " + word + " ";
+			
+		if (autofill) {
+			result += "enabled";
 		} else {
-			if (PlayRandom()) {
-				fillVoid = true;
-				return "Filling the void enabled.";
-			} else {
-				throw new CommandException("Can't fill the void :(", CommandExceptionReason.CommandError);
-			}
-			return "Filling the void is now enabled.";
+			result += "disabled";
 		}
+
+		if (autofillFrom != null) {
+			result += " using the playlists " + String.Join(", ", autofillFrom) + ".";
+		} else if (autofill) {
+			result += " using all playlists.";
+		} else {
+			result += ".";
+		}
+
+		return result;
+	}
+
+	private void DisableAutofill() {
+		autofill = false;
+		autofillFrom = null;
+	}
+
+	[Command("autofillstatus")]
+	public string CommandAutofillStatus(string[] parts = null) {
+		return AutofillStatus("currently");
+	}
+	
+	[Command("autofilloff")]
+	public string CommandAutofillOff(string[] parts = null) {
+		// Explicitly requested to turn it off
+		DisableAutofill();
+		return AutofillStatus("now");
+	}
+
+	[Command("autofill")]
+	public string CommandAutofill(string[] playlistIds = null) {
+		// Check if all playlists exist, otherwise throw exception
+		if (playlistIds != null) {
+			var existingPlaylistIds = playlistManager.GetAvailablePlaylists().UnwrapThrow().Select(entry => entry.Id);
+			foreach (var id in playlistIds) {
+				if (!existingPlaylistIds.Contains(id)) {
+					throw new CommandException("The playlist '" + id + "' does not exist.",
+						CommandExceptionReason.CommandError);
+				}
+			}
+		}
+
+		if (autofill && autofillFrom == null) {
+			// Currently enabled but without a selected set of playlists
+			
+			if (playlistIds != null && playlistIds.Length != 0) {
+				// If a selected set of playlists is given, change to "set of playlists"
+				autofillFrom = new List<string>(playlistIds);
+			} else {
+				// Else, disable autofill
+				DisableAutofill();
+			}
+		} else if (autofill && autofillFrom != null) {
+			// Currently enabled with a selected set of playlists
+			
+			if (playlistIds != null && playlistIds.Length != 0) {
+				// If a selected set of playlists is given, update it
+				autofillFrom = new List<string>(playlistIds);
+			} else {
+				// Else, switch to all
+				autofillFrom = null;
+			}
+		} else {
+			// Currently disabled, enable now (with set of playlists if given)
+			autofill = true;
+			if (playlistIds != null && playlistIds.Length != 0) {
+				autofillFrom = new List<string>(playlistIds);
+			} else {
+				autofillFrom = null;
+			}
+		}
+		
+		// Only play a song if there is currently none playing
+		if (autofill && !playManager.IsPlaying) {
+			PlayRandom().UnwrapThrow();
+		}
+
+		return AutofillStatus("now");
 	}
 
 	public static class VotableCommands {
