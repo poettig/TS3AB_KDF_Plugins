@@ -37,6 +37,7 @@ public class KDFCommands : IBotPlugin {
 
 	private const string YOUTUBE_URL_REGEX =
 		"^(?:https?:\\/\\/)(?:www\\.)?(?:youtube\\.com\\/watch\\?v=(.*?)(?:&.*)*|youtu\\.be\\/(.*?)\\??.*)$";
+
 	private const string TRUNCATED_MESSAGE =
 		"\nThe number of songs to add was reduced compared to your request.\n" +
 		"This can happen because the requested number of songs was not evenly divisible by the number of playlists " +
@@ -67,6 +68,7 @@ public class KDFCommands : IBotPlugin {
 		public string Title { get; }
 		public string PlaylistId { get; }
 		public string Username { get; }
+
 		public DescriptionThreadData(string title, string playlistId, string username) {
 			Title = title;
 			PlaylistId = playlistId;
@@ -103,7 +105,7 @@ public class KDFCommands : IBotPlugin {
 
 		if (!injector.TryGet<VoteData>(out _)) {
 			injector.AddModule(new VoteData());
-	}
+		}
 	}
 
 	public void Initialize() {
@@ -118,8 +120,8 @@ public class KDFCommands : IBotPlugin {
 
 	private void ResourceStarted(object sender, PlayInfoEventArgs e) {
 		descriptionThreadData = new DescriptionThreadData(
-			e.ResourceData.ResourceTitle, 
-			e.MetaData.ContainingPlaylistId, 
+			e.ResourceData.ResourceTitle,
+			e.MetaData.ContainingPlaylistId,
 			GetClientNameFromUid(ts3FullClient, e.PlayResource.Meta.ResourceOwnerUid));
 	}
 
@@ -150,7 +152,8 @@ public class KDFCommands : IBotPlugin {
 		foreach ((string playlistId, IReadOnlyPlaylist playlist) in playlists) {
 			if (songIndex < playlist.Items.Count) {
 				// Song is in this playlist
-				playManager.Enqueue(playlist[songIndex].AudioResource, new MetaData(ts3FullClient.Identity.ClientUid, playlistId)).UnwrapThrow();
+				playManager.Enqueue(playlist[songIndex].AudioResource,
+					new MetaData(ts3FullClient.Identity.ClientUid, playlistId)).UnwrapThrow();
 				return true;
 			} else {
 				// Song is in another playlist
@@ -177,6 +180,7 @@ public class KDFCommands : IBotPlugin {
 					builder.Append(" <Playlist: ").Append(data.PlaylistId).Append(">");
 				ts3Client.ChangeDescription(builder.ToString()).UnwrapThrow();
 			}
+
 			Thread.Sleep(1000);
 		}
 	}
@@ -219,11 +223,10 @@ public class KDFCommands : IBotPlugin {
 
 	[Command("list rqueue")]
 	public static string CommandListRQueue(
-			PlaylistManager playlistManager,
-			PlayManager playManager,
-			InvokerData invoker,
-			string[] parts) {
-
+		PlaylistManager playlistManager,
+		PlayManager playManager,
+		InvokerData invoker,
+		string[] parts) {
 		bool truncated = false;
 
 		// Check if last element is a number.
@@ -240,9 +243,11 @@ public class KDFCommands : IBotPlugin {
 			numPlaylists--;
 
 			if (count < 0) {
-				throw new CommandException("You can't add a negative number of songs.", CommandExceptionReason.CommandError);
+				throw new CommandException("You can't add a negative number of songs.",
+					CommandExceptionReason.CommandError);
 			} else if (count == 0) {
-				throw new CommandException("Adding no songs doesn't make any sense.", CommandExceptionReason.CommandError);
+				throw new CommandException("Adding no songs doesn't make any sense.",
+					CommandExceptionReason.CommandError);
 			}
 		}
 
@@ -253,7 +258,8 @@ public class KDFCommands : IBotPlugin {
 		}
 
 		if (songsPerPlaylist == 0) {
-				throw new CommandException("You need to add least at one song per playlist.", CommandExceptionReason.CommandError);
+			throw new CommandException("You need to add least at one song per playlist.",
+				CommandExceptionReason.CommandError);
 		}
 
 		int numSongsAdded = 0;
@@ -267,8 +273,9 @@ public class KDFCommands : IBotPlugin {
 			if (numSongsToTake != songsPerPlaylist) {
 				truncated = true;
 			}
+
 			numSongsAdded += numSongsToTake;
-			
+
 			var meta = new MetaData(invoker.ClientUid, plistId);
 			Shuffle(items, new Random());
 			allItems.AddRange(items.Take(numSongsToTake).Select(item => new QueueItem(item.AudioResource, meta)));
@@ -281,7 +288,7 @@ public class KDFCommands : IBotPlugin {
 			startPos = playManager.Queue.Items.Count - playManager.Queue.Index;
 			playManager.Enqueue(allItems).UnwrapThrow();
 		}
-		
+
 		return
 			"Added a total of " + numSongsAdded +
 			" songs across " + numPlaylists +
@@ -511,7 +518,8 @@ public class KDFCommands : IBotPlugin {
 	}
 
 	private static SortedSet<int> parseAndMap(PlayQueue playQueue, string indicesString) {
-		return new SortedSet<int>(ParseIndicesInBounds(indicesString, 1, playQueue.Items.Count - playQueue.Index - 1).Select(entry => entry + playQueue.Index));
+		return new SortedSet<int>(ParseIndicesInBounds(indicesString, 1, playQueue.Items.Count - playQueue.Index - 1)
+			.Select(entry => entry + playQueue.Index));
 	}
 
 	[Command("del")]
@@ -743,15 +751,15 @@ public class KDFCommands : IBotPlugin {
 	[Command("list search add")]
 	public static string CommandSearchAdd(
 		ExecutionInformation info, UserSession session, PlaylistManager playlistManager, string listId) {
-		if (!session.Get<List<(PlaylistItem, int)>>(SessionKeyListSearchResults, out var items)) {
+		if (!session.Get<SearchListItemsResult>(SessionKeyListSearchResults, out var result)) {
 			throw new CommandException("No search results found.", CommandExceptionReason.CommandError);
 		}
 
 		playlistManager.ModifyPlaylist(listId, list => {
 			MainCommands.CheckPlaylistModifiable(list, info, "modify");
-			list.AddRange(items.Select(item => item.Item1)).UnwrapThrow();
+			list.AddRange(result.Items.Select(item => item.Item1)).UnwrapThrow();
 		}).UnwrapThrow();
-		return $"Added {items.Count} items to {listId}.";
+		return $"Added {result.Items.Count} items to {listId}.";
 	}
 
 	[Command("list item queue")]
@@ -765,7 +773,8 @@ public class KDFCommands : IBotPlugin {
 			items.Add(plist.Items[index]);
 		}
 
-		playManager.Enqueue(items.Select(item => item.AudioResource), new MetaData(invoker.ClientUid, listId)).UnwrapThrow();
+		playManager.Enqueue(items.Select(item => item.AudioResource), new MetaData(invoker.ClientUid, listId))
+			.UnwrapThrow();
 		return $"Queued {items.Count} items from playlist {plist.Title}.";
 	}
 
