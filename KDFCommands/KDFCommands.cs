@@ -421,18 +421,17 @@ public class KDFCommands : IBotPlugin {
 		Ts3Client ts3Client,
 		string url,
 		string target) {
+		int index;
 		try {
-			MainCommands.CommandListAddInternal(resolver, playlistManager, info, target, url);
+			var playResource = resolver.Load(url).UnwrapThrow();
+			(_, index) = MainCommands.ListAddItem(playlistManager, info, target, playResource.BaseData);
 		} catch (CommandException e) {
 			SendMessage(ts3Client, cc, "Error occured for '" + url + "': " + e.Message);
 			return;
 		}
 
-		IReadOnlyPlaylist
-			playlist = playlistManager.LoadPlaylist(target).Value; // No unwrap needed, playlist exists if code got here
-		int index = playlist.Items.Count - 1;
 		SendMessage(ts3Client, cc,
-			"Added '" + GetTitle(playlist, index) +
+			"Added '" + target +
 			"' to playlist '" + target +
 			"' at position " + index
 		);
@@ -451,17 +450,14 @@ public class KDFCommands : IBotPlugin {
 		var result = resolver.Search("youtube", query).UnwrapSendMessage(ts3Client, cc, query);
 		if (result != null) {
 			AudioResource audioResource = result[0];
+			int index;
 			try {
-				MainCommands.ListAddItem(playlistManager, info, target, audioResource);
+				(_, index) = MainCommands.ListAddItem(playlistManager, info, target, audioResource);
 			} catch (CommandException e) {
 				SendMessage(ts3Client, cc, "Error occured for + '" + query + "': " + e.Message);
 				return;
 			}
 
-			IReadOnlyPlaylist
-				playlist = playlistManager.LoadPlaylist(target)
-					.Value; // No unwrap needed, playlist exists if code got here
-			int index = playlist.Items.Count - 1;
 			SendMessage(ts3Client, cc,
 				"Added '" + audioResource.ResourceTitle +
 				"' for your request '" + query +
