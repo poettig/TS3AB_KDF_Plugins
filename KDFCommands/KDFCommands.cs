@@ -154,18 +154,21 @@ public class KDFCommands : IBotPlugin {
 			var playlist = playlistManager.LoadPlaylist(playlistId).UnwrapThrow();
 			playlists.Add((playlistId, playlist));
 			numSongs += playlist.Items.Count;
+			Console.WriteLine("Playlist: {0}, number of songs: {1}", playlistId, playlist.Items.Count);
 		}
 
 		var plId = "";
 		AudioResource resource = null;
-		for (var i = 0; i < 10; i++) {
+		for (var i = 0; i < 5; i++) {
 			// Draw random song number
 			var songIndex = new Random().Next(0, numSongs);
+			Console.WriteLine("Drawn song index: {0}", songIndex);
 
 			// Find the randomized song
 			foreach (var (playlistId, playlist) in playlists) {
 				// Song is in this playlist
 				if (songIndex < playlist.Items.Count) {
+					Console.WriteLine("Found the song in playlist '{0}' at index {1}.", playlistId, songIndex);
 					plId = playlistId;
 					resource = playlist[songIndex].AudioResource;
 					break;
@@ -182,6 +185,7 @@ public class KDFCommands : IBotPlugin {
 			if (items.Count > 0) {
 				for (var j = items.Count - 1; j != 0 && j >= items.Count - 250; j--) {
 					if (items[j].AudioResource.Equals(resource)) {
+						Console.WriteLine("The song was already played {0} songs ago. Searching another one...", j);
 						foundDuplicate = true;
 					}
 				}
@@ -193,6 +197,7 @@ public class KDFCommands : IBotPlugin {
 		}
 
 		// Play song
+		Console.WriteLine("Playing the song '{0}' from playlist '{1}'.", resource.ResourceTitle, plId);
 		return playManager.Enqueue(resource, new MetaData(ts3FullClient.Identity.ClientUid, plId));
 	}
 
@@ -835,14 +840,14 @@ public class KDFCommands : IBotPlugin {
 	}
 	
 	[Command("autofilloff")]
-	public string CommandAutofillOff(string[] parts = null) {
+	public void CommandAutofillOff(string[] parts = null) {
 		// Explicitly requested to turn it off
 		DisableAutofill();
-		return AutofillStatus("now");
+		ts3Client.SendChannelMessage(AutofillStatus("now"));
 	}
 
 	[Command("autofill")]
-	public string CommandAutofill(string[] playlistIds = null) {
+	public void CommandAutofill(InvokerData invoker, string[] playlistIds = null) {
 		// Check if all playlists exist, otherwise throw exception
 		if (playlistIds != null) {
 			var existingPlaylistIds = playlistManager.GetAvailablePlaylists().UnwrapThrow().Select(entry => entry.Id);
@@ -889,7 +894,7 @@ public class KDFCommands : IBotPlugin {
 			PlayRandom().UnwrapThrow();
 		}
 
-		return AutofillStatus("now");
+		ts3Client.SendChannelMessage("[" + GetClientNameFromUid(ts3FullClient, invoker.ClientUid) + "] " + AutofillStatus("now"));
 	}
 
 	public static class VotableCommands {
