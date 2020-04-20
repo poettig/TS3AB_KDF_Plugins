@@ -464,8 +464,10 @@ public class KDFCommands : IBotPlugin {
 		string url,
 		string target) {
 		int index;
+		string title;
 		try {
 			var playResource = resolver.Load(url).UnwrapThrow();
+			title = playResource.BaseData.ResourceTitle;
 			(_, index) = MainCommands.ListAddItem(playlistManager, info, target, playResource.BaseData);
 		} catch (CommandException e) {
 			SendMessage(ts3Client, cc, "Error occured for '" + url + "': " + e.Message);
@@ -473,7 +475,7 @@ public class KDFCommands : IBotPlugin {
 		}
 
 		SendMessage(ts3Client, cc,
-			"Added '" + target +
+			"Added '" + title +
 			"' to playlist '" + target +
 			"' at position " + index
 		);
