@@ -930,7 +930,7 @@ public class KDFCommands : IBotPlugin {
 		public static readonly Dictionary<string, AVotableCommand> Commands = new Dictionary<string, AVotableCommand>(
 			new[] {
 				new KeyValuePair<string, AVotableCommand>("pause", EmptyArgsCommand.Instance),
-				new KeyValuePair<string, AVotableCommand>("previous", EmptyArgsCommand.Instance),
+				new KeyValuePair<string, AVotableCommand>("previous", EmptyArgsCommand.ResetInstance),
 				new KeyValuePair<string, AVotableCommand>("stop", EmptyArgsCommand.Instance),
 				new KeyValuePair<string, AVotableCommand>("clear", EmptyArgsCommand.Instance),
 				new KeyValuePair<string, AVotableCommand>("front", FrontCommand.Instance),
@@ -938,12 +938,16 @@ public class KDFCommands : IBotPlugin {
 			});
 
 		public class EmptyArgsCommand : AVotableCommand {
+			public bool ResetOnResourceEnd { get; }
+
 			public override (Func<string> action, bool removeOnResourceEnd) Create(ExecutionInformation info, string command, string args) {
 				AreEmpty(args).UnwrapThrow();
-				return (() => ExecuteCommandWithArgs(info, command, args), false);
+				return (() => ExecuteCommandWithArgs(info, command, args), ResetOnResourceEnd);
 			}
-			private EmptyArgsCommand() {}
-			public static AVotableCommand Instance { get; } = new EmptyArgsCommand();
+
+			private EmptyArgsCommand(bool reset) { ResetOnResourceEnd = reset; }
+			public static AVotableCommand ResetInstance { get; } = new EmptyArgsCommand(true);
+			public static AVotableCommand Instance { get; } = new EmptyArgsCommand(false);
 		}
 
 		public class SkipCommand : AVotableCommand {
