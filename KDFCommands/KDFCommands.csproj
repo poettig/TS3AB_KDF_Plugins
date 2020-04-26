@@ -10,13 +10,13 @@
 
 	<ItemGroup>
 		<Reference Include="NLog">
-		<HintPath>../../NLog.dll</HintPath>
+		<HintPath>..\..\NLog.dll</HintPath>
 		</Reference>
 		<Reference Include="TS3AudioBot">
-		<HintPath>../../TS3AudioBot.dll</HintPath>
+		<HintPath>..\..\TS3AudioBot.dll</HintPath>
 		</Reference>
 		<Reference Include="TSLib">
-		<HintPath>../../TSLib.dll</HintPath>
+		<HintPath>..\..\TSLib.dll</HintPath>
 		</Reference>
 	</ItemGroup>
 
