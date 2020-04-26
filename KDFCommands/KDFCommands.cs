@@ -163,8 +163,8 @@ public class KDFCommands : IBotPlugin {
 			var playlist = playlistManager.LoadPlaylist(playlistId).UnwrapThrow();
 			playlists.Add((playlistId, playlist));
 			numSongs += playlist.Items.Count;
-			Console.WriteLine("Playlist: {0}, number of songs: {1}", playlistId, playlist.Items.Count);
 		}
+		Console.WriteLine("Found {0} songs across {1} playlists.", numSongs, playlists.Count);
 
 		var plId = "";
 		AudioResource resource = null;
@@ -194,7 +194,7 @@ public class KDFCommands : IBotPlugin {
 			if (items.Count > 0) {
 				for (var j = items.Count - 1; j != 0 && j >= items.Count - 250; j--) {
 					if (items[j].AudioResource.Equals(resource)) {
-						Console.WriteLine("The song was already played {0} songs ago. Searching another one...", j);
+						Console.WriteLine("The song was already played {0} songs ago. Searching another one...", items.Count - j - 1);
 						foundDuplicate = true;
 					}
 				}
