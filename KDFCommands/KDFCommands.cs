@@ -193,7 +193,7 @@ public class KDFCommands : IBotPlugin {
 			// Find the randomized song
 			var infoOpt = FindSong(songIndex, playlists);
 			if (!infoOpt.Ok) {
-				throw new CommandException("Could not find the song", CommandExceptionReason.InternalError);
+				throw new CommandException("Autofill: Could not find the song at index " + songIndex + ".", CommandExceptionReason.InternalError);
 			}
 
 			var (list, index) = infoOpt.Value;
@@ -223,7 +223,7 @@ public class KDFCommands : IBotPlugin {
 		}
 
 		if (resource == null) { // Should not happen
-			throw new CommandException("Could not find a song", CommandExceptionReason.InternalError);
+			throw new CommandException("Autofill: Missing resource for song at index " index + " in playlist " + plId + ".", CommandExceptionReason.InternalError);
 		}
 
 		// Play song
