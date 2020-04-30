@@ -183,6 +183,7 @@ public class KDFCommands : IBotPlugin {
 		}
 		Console.WriteLine("Found {0} songs across {1} playlists.", numSongs, playlists.Count);
 
+		var sIdx = 0;
 		string plId = null;
 		AudioResource resource = null;
 		for (var i = 0; i < 5; i++) {
@@ -200,6 +201,7 @@ public class KDFCommands : IBotPlugin {
 			Console.WriteLine("Found the song in playlist '{0}' at index {1}.", list.Id, index);
 			var playlist = playlistManager.LoadPlaylist(list.Id).UnwrapThrow();
 
+			sIdx = index;
 			plId = list.Id;
 			resource = playlist.Items[index].AudioResource;
 
@@ -223,7 +225,7 @@ public class KDFCommands : IBotPlugin {
 		}
 
 		if (resource == null) { // Should not happen
-			throw new CommandException("Autofill: Missing resource for song at index " index + " in playlist " + plId + ".", CommandExceptionReason.InternalError);
+			throw new CommandException("Autofill: Missing resource for song at index " + sIdx + " in playlist " + plId + ".", CommandExceptionReason.InternalError);
 		}
 
 		// Play song
