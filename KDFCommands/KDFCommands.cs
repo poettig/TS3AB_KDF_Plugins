@@ -2,9 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using System.Net.Http;
+using System.Runtime.InteropServices.WindowsRuntime;
 using System.Text;
 using System.Threading;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+using Newtonsoft.Json.Linq;
 using TS3AudioBot;
 using TS3AudioBot.Audio;
 using TS3AudioBot.CommandSystem;
@@ -455,6 +459,109 @@ public class KDFCommands : IBotPlugin {
 			}
 		}
 	}
+	
+	public class LoggingHandler : DelegatingHandler
+	{
+		public LoggingHandler(HttpMessageHandler innerHandler)
+			: base(innerHandler)
+		{
+		}
+
+		protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+		{
+			Console.WriteLine("Request:");
+			Console.WriteLine(request.ToString());
+			if (request.Content != null)
+			{
+				Console.WriteLine(await request.Content.ReadAsStringAsync());
+			}
+			Console.WriteLine();
+
+			HttpResponseMessage response = await base.SendAsync(request, cancellationToken);
+
+			Console.WriteLine("Response:");
+			Console.WriteLine(response.ToString());
+			if (response.Content != null)
+			{
+				Console.WriteLine(await response.Content.ReadAsStringAsync());
+			}
+			Console.WriteLine();
+
+			return response;
+		}
+	}
+	
+	[Command("spotify")]
+	public static void CommandSpotify(
+		PlaylistManager playlistManager,
+		PlayManager playManager,
+		ExecutionInformation info,
+		InvokerData invoker,
+		ResolveContext resolver,
+		ClientCall cc,
+		Ts3Client ts3Client,
+		string username,
+		string playlistName,
+		string oauth) {
+		
+		var client = new HttpClient();
+		client.DefaultRequestHeaders.Add("Authorization", "Bearer " + oauth);
+
+		var resp = client.GetAsync("https://api.spotify.com/v1/users/" + username + "/playlists").Result;
+		if (!resp.IsSuccessStatusCode) {
+			throw new CommandException(
+				"Getting the users playlists failed (" + resp.StatusCode +
+				"). Maybe the username is wrong or the oauth token is invalid.", CommandExceptionReason.CommandError);
+		}
+
+		var pNameSpotify = playlistName.Replace("\"", "");
+		var pNameInternal = pNameSpotify.Replace(" ", "");
+
+		// Get playlist id
+		JObject data = JObject.Parse(resp.Content.ReadAsStringAsync().Result);
+		string playlistId = null;
+		foreach (var playlist in data["items"]) {
+			if (playlist["name"].ToString() == pNameSpotify) {
+				playlistId = playlist["id"].ToString();
+			}
+		}
+
+		if (playlistId == null) {
+			throw new CommandException("No playlist with the name '" + pNameSpotify + "' found for spotify user '" + username +"'", CommandExceptionReason.CommandError);
+		}
+		
+		// Create the playlist. Throws Exception if it does already exist.
+		MainCommands.CommandListCreate(playlistManager, invoker, pNameInternal);
+		
+		// Get all playlist items and add to the playlist
+		var nextUrl = "Init";
+		while (nextUrl != null) {
+			resp = nextUrl == "Init" ? client.GetAsync("https://api.spotify.com/v1/playlists/" + playlistId + "/tracks").Result : client.GetAsync(nextUrl).Result;
+
+			if (resp == null || !resp.IsSuccessStatusCode) {
+				throw new CommandException("Could not get the items from the playlist (" + resp?.StatusCode + ").", CommandExceptionReason.CommandError);
+			}
+			
+			data = JObject.Parse(resp.Content.ReadAsStringAsync().Result);
+			foreach (var item in data["items"]) {
+				var title = item["track"]["name"];
+				var artists = item["track"]["artists"].Select(artist => artist["name"].ToString()).ToList();
+				ListAddQuery(
+					playlistManager,
+					playManager,
+					info,
+					invoker,
+					resolver,
+					cc,
+					ts3Client,
+					title + " " + string.Join(" ", artists),
+					pNameInternal
+				);
+			}
+
+			nextUrl = data.ContainsKey("next") && !string.IsNullOrEmpty(data["next"].ToString()) ? data["next"].ToString() : null;
+		}
+	}
 
 	[Command("list add")]
 	public static void CommandListYoutube(
@@ -521,7 +628,7 @@ public class KDFCommands : IBotPlugin {
 			try {
 				(_, index) = MainCommands.ListAddItem(playlistManager, info, target, audioResource);
 			} catch (CommandException e) {
-				SendMessage(ts3Client, cc, "Error occured for + '" + query + "': " + e.Message);
+				SendMessage(ts3Client, cc, "Error occured for '" + query + "': " + e.Message);
 				return;
 			}
 
