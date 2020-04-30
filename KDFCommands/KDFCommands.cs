@@ -83,7 +83,7 @@ public class KDFCommands : IBotPlugin {
 	private TsFullClient ts3FullClient;
 
 	private bool autofill = false;
-	private List<string> autofillFrom;
+	private HashSet<string> autofillFrom;
 
 	private VoteData voteData;
 
@@ -871,7 +871,7 @@ public class KDFCommands : IBotPlugin {
 			
 			if (playlistIds != null && playlistIds.Length != 0) {
 				// If a selected set of playlists is given, change to "set of playlists"
-				autofillFrom = new List<string>(playlistIds);
+				autofillFrom = new HashSet<string>(playlistIds);
 			} else {
 				// Else, disable autofill
 				DisableAutofill();
@@ -881,7 +881,7 @@ public class KDFCommands : IBotPlugin {
 			
 			if (playlistIds != null && playlistIds.Length != 0) {
 				// If a selected set of playlists is given, update it
-				autofillFrom = new List<string>(playlistIds);
+				autofillFrom = new HashSet<string>(playlistIds);
 			} else {
 				// Else, switch to all
 				autofillFrom = null;
@@ -890,7 +890,7 @@ public class KDFCommands : IBotPlugin {
 			// Currently disabled, enable now (with set of playlists if given)
 			autofill = true;
 			if (playlistIds != null && playlistIds.Length != 0) {
-				autofillFrom = new List<string>(playlistIds);
+				autofillFrom = new HashSet<string>(playlistIds);
 			} else {
 				autofillFrom = null;
 			}
