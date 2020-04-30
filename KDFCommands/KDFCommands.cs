@@ -857,10 +857,11 @@ public class KDFCommands : IBotPlugin {
 	public void CommandAutofill(InvokerData invoker, string[] playlistIds = null) {
 		// Check if all playlists exist, otherwise throw exception
 		if (playlistIds != null) {
-			var existingPlaylistIds = playlistManager.GetAvailablePlaylists().UnwrapThrow().Select(entry => entry.Id);
-			foreach (var id in playlistIds) {
-				if (!existingPlaylistIds.Contains(id)) {
-					throw new CommandException("The playlist '" + id + "' does not exist.",
+			for (int i = 0; i < playlistIds.Length; ++i) {
+				if (playlistManager.TryGetPlaylistId(playlistIds[i], out var realId)) {
+					playlistIds[i] = realId; // Apply possible correction
+				} else {
+					throw new CommandException("The playlist '" + playlistIds[i] + "' does not exist.",
 						CommandExceptionReason.CommandError);
 				}
 			}
