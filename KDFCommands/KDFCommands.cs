@@ -18,6 +18,7 @@ using TS3AudioBot.Helper;
 using TS3AudioBot.Localization;
 using TS3AudioBot.Sessions;
 using TS3AudioBot.Web.Api;
+using TS3AudioBot.Web.Model;
 using TSLib;
 using TSLib.Full;
 using TSLib.Full.Book;
@@ -149,24 +150,34 @@ public class KDFCommands : IBotPlugin {
 		}
 	}
 
+	private static R<(PlaylistInfo list, int offset)> FindSong(int index, ICollection<PlaylistInfo> playlists) {
+		foreach(var list in playlists) {
+			if (index < list.SongCount)
+				return (list, index);
+			index -= list.SongCount;
+		}
+
+		return R.Err;
+	}
+
 	private E<LocalStr> PlayRandom() {
 		// Play random song from a random playlist currently in the selected set
 
 		// Get total number of songs from all selected playlists
 		var numSongs = 0;
-		var playlists = new List<(string, IReadOnlyPlaylist)>();
-		foreach (string playlistId in playlistManager.GetAvailablePlaylists().UnwrapThrow().Select(entry => entry.Id)) {
-			if (autofillFrom != null && !autofillFrom.Contains(playlistId)) {
+		var playlistsUnfiltered = playlistManager.GetAvailablePlaylists().UnwrapThrow();
+		List<PlaylistInfo> playlists = new List<PlaylistInfo>();
+ 		foreach (var playlist in playlistsUnfiltered) {
+			if (autofillFrom != null && !autofillFrom.Contains(playlist.Id)) {
 				continue;
 			}
 
-			var playlist = playlistManager.LoadPlaylist(playlistId).UnwrapThrow();
-			playlists.Add((playlistId, playlist));
-			numSongs += playlist.Items.Count;
+	        playlists.Add(playlist);
+			numSongs += playlist.SongCount;
 		}
 		Console.WriteLine("Found {0} songs across {1} playlists.", numSongs, playlists.Count);
 
-		var plId = "";
+		string plId = null;
 		AudioResource resource = null;
 		for (var i = 0; i < 5; i++) {
 			// Draw random song number
@@ -174,18 +185,17 @@ public class KDFCommands : IBotPlugin {
 			Console.WriteLine("Drawn song index: {0}", songIndex);
 
 			// Find the randomized song
-			foreach (var (playlistId, playlist) in playlists) {
-				// Song is in this playlist
-				if (songIndex < playlist.Items.Count) {
-					Console.WriteLine("Found the song in playlist '{0}' at index {1}.", playlistId, songIndex);
-					plId = playlistId;
-					resource = playlist[songIndex].AudioResource;
-					break;
-				}
-
-				// Song is in another playlist
-				songIndex -= playlist.Items.Count;
+			var infoOpt = FindSong(songIndex, playlists);
+			if (!infoOpt.Ok) {
+				throw new CommandException("Could not find the song", CommandExceptionReason.InternalError);
 			}
+
+			var (list, index) = infoOpt.Value;
+			Console.WriteLine("Found the song in playlist '{0}' at index {1}.", list.Id, index);
+			var playlist = playlistManager.LoadPlaylist(list.Id).UnwrapThrow();
+
+			plId = list.Id;
+			resource = playlist.Items[index].AudioResource;
 
 			// Check if the song was already played in the last 250 songs, if not take this one.
 			// If items.count < 250, the subtraction is negative, meaning that j == 0 will be reached first
@@ -196,6 +206,7 @@ public class KDFCommands : IBotPlugin {
 					if (items[j].AudioResource.Equals(resource)) {
 						Console.WriteLine("The song was already played {0} songs ago. Searching another one...", items.Count - j - 1);
 						foundDuplicate = true;
+						break;
 					}
 				}
 			}
@@ -203,6 +214,10 @@ public class KDFCommands : IBotPlugin {
 			if (!foundDuplicate) {
 				break;
 			}
+		}
+
+		if (resource == null) { // Should not happen
+			throw new CommandException("Could not find a song", CommandExceptionReason.InternalError);
 		}
 
 		// Play song
