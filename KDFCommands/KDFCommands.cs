@@ -83,8 +83,14 @@ public class KDFCommands : IBotPlugin {
 	private Ts3Client ts3Client;
 	private TsFullClient ts3FullClient;
 
-	private bool autofill = false;
-	private HashSet<string> autofillFrom;
+	private class AutoFillData {
+		public Random Random { get; } = new Random();
+		public HashSet<string> Playlists { get; set; } = null;
+	}
+
+	private AutoFillData autofillData = null;
+
+	private bool AutofillEnabled => autofillData != null;
 
 	private VoteData voteData;
 
@@ -136,7 +142,7 @@ public class KDFCommands : IBotPlugin {
 	}
 
 	private void PlaybackStopped(object sender, EventArgs e) {
-		if (playManager.Queue.Items.Count == playManager.Queue.Index && autofill) {
+		if (playManager.Queue.Items.Count == playManager.Queue.Index && AutofillEnabled) {
 			if (!ts3Client.IsDefinitelyAlone()) {
 				var result = PlayRandom();
 				if (!result.Ok) {
@@ -168,7 +174,7 @@ public class KDFCommands : IBotPlugin {
 		var playlistsUnfiltered = playlistManager.GetAvailablePlaylists().UnwrapThrow();
 		List<PlaylistInfo> playlists = new List<PlaylistInfo>();
  		foreach (var playlist in playlistsUnfiltered) {
-			if (autofillFrom != null && !autofillFrom.Contains(playlist.Id)) {
+			if (autofillData.Playlists != null && !autofillData.Playlists.Contains(playlist.Id)) {
 				continue;
 			}
 
@@ -181,7 +187,7 @@ public class KDFCommands : IBotPlugin {
 		AudioResource resource = null;
 		for (var i = 0; i < 5; i++) {
 			// Draw random song number
-			var songIndex = new Random().Next(0, numSongs);
+			var songIndex = autofillData.Random.Next(0, numSongs);
 			Console.WriteLine("Drawn song index: {0}", songIndex);
 
 			// Find the randomized song
@@ -834,17 +840,16 @@ public class KDFCommands : IBotPlugin {
 	private string AutofillStatus(string word) {
 		string result = "Autofill is " + word + " ";
 			
-		if (autofill) {
+		if (AutofillEnabled) {
 			result += "enabled";
+
+			if(autofillData.Playlists != null) {
+				result += " using the playlists " + String.Join(", ", autofillData.Playlists) + ".";
+			} else {
+				result += " using all playlists.";
+			}
 		} else {
 			result += "disabled";
-		}
-
-		if (autofillFrom != null) {
-			result += " using the playlists " + String.Join(", ", autofillFrom) + ".";
-		} else if (autofill) {
-			result += " using all playlists.";
-		} else {
 			result += ".";
 		}
 
@@ -852,8 +857,7 @@ public class KDFCommands : IBotPlugin {
 	}
 
 	private void DisableAutofill() {
-		autofill = false;
-		autofillFrom = null;
+		autofillData = null;
 	}
 
 	[Command("autofillstatus")]
@@ -882,38 +886,40 @@ public class KDFCommands : IBotPlugin {
 			}
 		}
 
-		if (autofill && autofillFrom == null) {
-			// Currently enabled but without a selected set of playlists
+		if (AutofillEnabled) {
+			if (autofillData.Playlists == null) {
+				// Currently enabled but without a selected set of playlists
 			
-			if (playlistIds != null && playlistIds.Length != 0) {
-				// If a selected set of playlists is given, change to "set of playlists"
-				autofillFrom = new HashSet<string>(playlistIds);
+				if (playlistIds != null && playlistIds.Length != 0) {
+					// If a selected set of playlists is given, change to "set of playlists"
+					autofillData.Playlists = new HashSet<string>(playlistIds);
+				} else {
+					// Else, disable autofill
+					DisableAutofill();
+				}
 			} else {
-				// Else, disable autofill
-				DisableAutofill();
-			}
-		} else if (autofill && autofillFrom != null) {
-			// Currently enabled with a selected set of playlists
+				// Currently enabled with a selected set of playlists
 			
-			if (playlistIds != null && playlistIds.Length != 0) {
-				// If a selected set of playlists is given, update it
-				autofillFrom = new HashSet<string>(playlistIds);
-			} else {
-				// Else, switch to all
-				autofillFrom = null;
+				if (playlistIds != null && playlistIds.Length != 0) {
+					// If a selected set of playlists is given, update it
+					autofillData.Playlists = new HashSet<string>(playlistIds);
+				} else {
+					// Else, switch to all
+					autofillData.Playlists = null;
+				}
 			}
 		} else {
 			// Currently disabled, enable now (with set of playlists if given)
-			autofill = true;
+			autofillData = new AutoFillData();
 			if (playlistIds != null && playlistIds.Length != 0) {
-				autofillFrom = new HashSet<string>(playlistIds);
+				autofillData.Playlists = new HashSet<string>(playlistIds);
 			} else {
-				autofillFrom = null;
+				autofillData.Playlists = null;
 			}
 		}
-		
+
 		// Only play a song if there is currently none playing
-		if (autofill && !playManager.IsPlaying) {
+		if (AutofillEnabled && !playManager.IsPlaying) {
 			PlayRandom().UnwrapThrow();
 		}
 
