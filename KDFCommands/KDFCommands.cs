@@ -279,7 +279,6 @@ public class KDFCommands : IBotPlugin {
 	}
 
 	private static string GetName(PlayQueue queue, int index, TsFullClient ts3FullClient) {
-		Console.WriteLine(queue.Items[index].MetaData.ResourceOwnerUid?.Value);
 		if (queue.Items[index].MetaData.ResourceOwnerUid?.Value == "Anonymous") {
 			return  GetClientNameFromUid(ts3FullClient, ts3FullClient.Identity.ClientUid);
 		}
