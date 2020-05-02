@@ -27,6 +27,7 @@ using TSLib;
 using TSLib.Full;
 using TSLib.Full.Book;
 using TSLib.Helper;
+using TSLib.Messages;
 
 public class KDFCommands : IBotPlugin {
 	private static readonly NLog.Logger Log = NLog.LogManager.GetCurrentClassLogger(); // TODO this does not get printed
@@ -258,7 +259,15 @@ public class KDFCommands : IBotPlugin {
 	}
 
 	private static string GetClientNameFromUid(TsFullClient ts3FullClient, Uid? id) {
-		return id.HasValue ? ts3FullClient.GetClientNameFromUid(id.Value).Value.Name : null;
+		if (id.HasValue) {
+			if (id.Value.ToString() == "Anonymous") {
+				return GetClientNameFromUid(ts3FullClient, ts3FullClient.Identity.ClientUid);
+			} else {
+				return ts3FullClient.GetClientNameFromUid(id.Value).Value.Name;
+			}
+		} else {
+			return null;
+		}
 	}
 
 	private static bool HasPlaylistId(PlayQueue queue, int index) {
@@ -280,7 +289,7 @@ public class KDFCommands : IBotPlugin {
 
 	private static string GetName(PlayQueue queue, int index, TsFullClient ts3FullClient) {
 		if (queue.Items[index].MetaData.ResourceOwnerUid?.Value == "Anonymous") {
-			return  GetClientNameFromUid(ts3FullClient, ts3FullClient.Identity.ClientUid);
+			return GetClientNameFromUid(ts3FullClient, ts3FullClient.Identity.ClientUid);
 		}
 
 		return GetClientNameFromUid(ts3FullClient, queue.Items[index].MetaData.ResourceOwnerUid);
@@ -938,16 +947,24 @@ public class KDFCommands : IBotPlugin {
 	[Command("list item queue")]
 	public static string CommandItemQueue(
 		InvokerData invoker, PlaylistManager playlistManager, PlayManager playManager, string listId,
-		string indicesString) {
+		string indicesString, string uid = null) {
 		var plist = playlistManager.LoadPlaylist(listId).UnwrapThrow();
 		var indices = ParseIndicesInBounds(indicesString, 0, plist.Items.Count - 1);
 		var items = new List<PlaylistItem>(indices.Count);
-		foreach (var index in indices) {
-			items.Add(plist.Items[index]);
+		items.AddRange(indices.Select(index => plist.Items[index]));
+
+		playManager.Enqueue(items.Select(item => item.AudioResource), new MetaData(uid != null ? Uid.To(uid) : invoker.ClientUid, listId)).UnwrapThrow();
+		return $"Queued {items.Count} items from playlist {plist.Title}.";
+	}
+
+	[Command("checkuser online byuid")]
+	public static bool CommandCheckUserByUid(TsFullClient ts3FullClient, string uid) {
+		var result = ts3FullClient.ClientList(ClientListOptions.uid);
+		if (!result) {
+			return false;
 		}
 
-		playManager.Enqueue(items.Select(item => item.AudioResource), new MetaData(invoker.ClientUid, listId)).UnwrapThrow();
-		return $"Queued {items.Count} items from playlist {plist.Title}.";
+		return result.Value.Count(item => item.Uid.ToString() == uid) != 0;
 	}
 
 	private string AutofillStatus(string word) {
