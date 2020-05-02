@@ -286,7 +286,6 @@ public class KDFCommands : IBotPlugin {
 			}
 		} else {
 			return null;
-			
 		}
 	}
 
