@@ -91,6 +91,7 @@ public class KDFCommands : IBotPlugin {
 	private class AutoFillData {
 		public Random Random { get; } = new Random();
 		public HashSet<string> Playlists { get; set; } = null;
+		public R<QueueItem, LocalStr> Next { get; set; }
 	}
 
 	private AutoFillData autofillData = null;
@@ -171,7 +172,7 @@ public class KDFCommands : IBotPlugin {
 		return R.Err;
 	}
 
-	private E<LocalStr> PlayRandom() {
+	private R<QueueItem, LocalStr> DrawRandom() {
 		// Play random song from a random playlist currently in the selected set
 
 		// Get total number of songs from all selected playlists
@@ -186,7 +187,7 @@ public class KDFCommands : IBotPlugin {
 	        playlists.Add(playlist);
 			numSongs += playlist.SongCount;
 		}
-		Console.WriteLine("Found {0} songs across {1} playlists.", numSongs, playlists.Count);
+		// Console.WriteLine("Found {0} songs across {1} playlists.", numSongs, playlists.Count);
 
 		var sIdx = 0;
 		string plId = null;
@@ -194,7 +195,7 @@ public class KDFCommands : IBotPlugin {
 		for (var i = 0; i < 5; i++) {
 			// Draw random song number
 			var songIndex = autofillData.Random.Next(0, numSongs);
-			Console.WriteLine("Drawn song index: {0}", songIndex);
+			// Console.WriteLine("Drawn song index: {0}", songIndex);
 
 			// Find the randomized song
 			var infoOpt = FindSong(songIndex, playlists);
@@ -203,7 +204,7 @@ public class KDFCommands : IBotPlugin {
 			}
 
 			var (list, index) = infoOpt.Value;
-			Console.WriteLine("Found the song in playlist '{0}' at index {1}.", list.Id, index);
+			// Console.WriteLine("Found the song in playlist '{0}' at index {1}.", list.Id, index);
 			var playlist = playlistManager.LoadPlaylist(list.Id).UnwrapThrow();
 
 			sIdx = index;
@@ -217,7 +218,7 @@ public class KDFCommands : IBotPlugin {
 			if (items.Count > 0) {
 				for (var j = items.Count - 1; j != 0 && j >= items.Count - 250; j--) {
 					if (items[j].AudioResource.Equals(resource)) {
-						Console.WriteLine("The song was already played {0} songs ago. Searching another one...", items.Count - j - 1);
+						// Console.WriteLine("The song was already played {0} songs ago. Searching another one...", items.Count - j - 1);
 						foundDuplicate = true;
 						break;
 					}
@@ -233,11 +234,28 @@ public class KDFCommands : IBotPlugin {
 			throw new CommandException("Autofill: Missing resource for song at index " + sIdx + " in playlist " + plId + ".", CommandExceptionReason.InternalError);
 		}
 
-		// Play song
-		Console.WriteLine("Playing the song '{0}' from playlist '{1}'.", resource.ResourceTitle, plId);
-		return playManager.Enqueue(resource, new MetaData(ts3FullClient.Identity.ClientUid, plId));
+		return new QueueItem(resource, new MetaData(ts3FullClient.Identity.ClientUid, plId));
 	}
 
+	private void DrawNextSong() {
+		autofillData.Next = DrawRandom();
+		if(autofillData.Next.Ok)
+			playManager.PrepareNextSong(autofillData.Next.Value);
+	}
+
+	private E<LocalStr> PlayRandom() {
+		if (!autofillData.Next.Ok)
+			return autofillData.Next.Error;
+		if(autofillData.Next.Value == null)
+			throw new InvalidOperationException();
+
+		var item = autofillData.Next.Value;
+		// Console.WriteLine("Playing the song '{0}' from playlist '{1}'.", item.AudioResource.ResourceTitle, item.MetaData.ContainingPlaylistId);
+		var res = playManager.Enqueue(item);
+		DrawNextSong();
+		return res;
+	}
+	
 	private void DescriptionUpdater() {
 		while (running) {
 			if (playManager.IsPlaying && descriptionThreadData != null) {
@@ -1024,6 +1042,7 @@ public class KDFCommands : IBotPlugin {
 				if (playlistIds != null && playlistIds.Length != 0) {
 					// If a selected set of playlists is given, change to "set of playlists"
 					autofillData.Playlists = new HashSet<string>(playlistIds);
+					DrawNextSong();
 				} else {
 					// Else, disable autofill
 					DisableAutofill();
@@ -1038,6 +1057,7 @@ public class KDFCommands : IBotPlugin {
 					// Else, switch to all
 					autofillData.Playlists = null;
 				}
+				DrawNextSong();
 			}
 		} else {
 			// Currently disabled, enable now (with set of playlists if given)
@@ -1047,6 +1067,7 @@ public class KDFCommands : IBotPlugin {
 			} else {
 				autofillData.Playlists = null;
 			}
+			autofillData.Next = DrawRandom();
 		}
 
 		// Only play a song if there is currently none playing
