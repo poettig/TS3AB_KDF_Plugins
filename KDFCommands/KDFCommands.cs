@@ -89,7 +89,7 @@ public class KDFCommands : IBotPlugin {
 	private class AutoFillData {
 		public Random Random { get; } = new Random();
 		public HashSet<string> Playlists { get; set; } = null;
-		public R<QueueItem, LocalStr> Next { get; set; }
+		public QueueItem Next { get; set; }
 	}
 
 	private AutoFillData autofillData;
@@ -175,9 +175,6 @@ public class KDFCommands : IBotPlugin {
 			if (result.Ok) {
 				return;
 			}
-			
-			// Did not work, draw a new song.
-			DrawNextSong();
 		}
 
 		ts3Client.SendChannelMessage("Could not play a new autofill song after 10 tries. Disabling autofill.");
@@ -194,7 +191,7 @@ public class KDFCommands : IBotPlugin {
 		return R.Err;
 	}
 
-	private R<QueueItem, LocalStr> DrawRandom() {
+	private QueueItem DrawRandom() {
 		// Play random song from a random playlist currently in the selected set
 
 		// Get total number of songs from all selected playlists
@@ -264,17 +261,14 @@ public class KDFCommands : IBotPlugin {
 
 	private void DrawNextSong() {
 		autofillData.Next = DrawRandom();
-		if(autofillData.Next.Ok)
-			playManager.PrepareNextSong(autofillData.Next.Value);
+		playManager.PrepareNextSong(autofillData.Next);
 	}
 
 	private E<LocalStr> PlayRandom() {
-		if (!autofillData.Next.Ok)
-			return autofillData.Next.Error;
-		if(autofillData.Next.Value == null)
+		if(autofillData.Next == null)
 			throw new InvalidOperationException();
 
-		var item = autofillData.Next.Value;
+		var item = autofillData.Next;
 		Log.Info("Autofilling the song '{0}' from playlist '{1}'.", item.AudioResource.ResourceTitle, item.MetaData.ContainingPlaylistId);
 		var res = playManager.Enqueue(item);
 		DrawNextSong();
