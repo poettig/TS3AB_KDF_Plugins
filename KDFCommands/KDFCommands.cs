@@ -187,7 +187,7 @@ public class KDFCommands : IBotPlugin {
 	        playlists.Add(playlist);
 			numSongs += playlist.SongCount;
 		}
-		// Console.WriteLine("Found {0} songs across {1} playlists.", numSongs, playlists.Count);
+		Log.Debug("Found {0} songs across {1} playlists.", numSongs, playlists.Count);
 
 		var sIdx = 0;
 		string plId = null;
@@ -195,17 +195,18 @@ public class KDFCommands : IBotPlugin {
 		for (var i = 0; i < 5; i++) {
 			// Draw random song number
 			var songIndex = autofillData.Random.Next(0, numSongs);
-			// Console.WriteLine("Drawn song index: {0}", songIndex);
 
 			// Find the randomized song
 			var infoOpt = FindSong(songIndex, playlists);
-			if (!infoOpt.Ok) {
+			if (!infoOpt.Ok)
 				throw new CommandException("Autofill: Could not find the song at index " + songIndex + ".", CommandExceptionReason.InternalError);
-			}
 
 			var (list, index) = infoOpt.Value;
-			// Console.WriteLine("Found the song in playlist '{0}' at index {1}.", list.Id, index);
+			Log.Info("Found the song {0} in playlist '{1}' at index {2}.", songIndex, list.Id, index);
 			var playlist = playlistManager.LoadPlaylist(list.Id).UnwrapThrow();
+
+			if(playlist.Items.Count != list.SongCount)
+				Log.Warn("Playlist '{0}' is possibly corrupted!", list.Id);
 
 			sIdx = index;
 			plId = list.Id;
@@ -218,7 +219,7 @@ public class KDFCommands : IBotPlugin {
 			if (items.Count > 0) {
 				for (var j = items.Count - 1; j != 0 && j >= items.Count - 250; j--) {
 					if (items[j].AudioResource.Equals(resource)) {
-						// Console.WriteLine("The song was already played {0} songs ago. Searching another one...", items.Count - j - 1);
+						Log.Info("The song {0} was already played {1} songs ago. Searching another one...", items[j].AudioResource.ResourceTitle,items.Count - j - 1);
 						foundDuplicate = true;
 						break;
 					}
@@ -250,7 +251,7 @@ public class KDFCommands : IBotPlugin {
 			throw new InvalidOperationException();
 
 		var item = autofillData.Next.Value;
-		// Console.WriteLine("Playing the song '{0}' from playlist '{1}'.", item.AudioResource.ResourceTitle, item.MetaData.ContainingPlaylistId);
+		Log.Info("Autofilling the song '{0}' from playlist '{1}'.", item.AudioResource.ResourceTitle, item.MetaData.ContainingPlaylistId);
 		var res = playManager.Enqueue(item);
 		DrawNextSong();
 		return res;
