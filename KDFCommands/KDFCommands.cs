@@ -148,7 +148,20 @@ public class KDFCommands : IBotPlugin {
 			GetClientNameFromUid(ts3FullClient, e.PlayResource.Meta.ResourceOwnerUid));
 	}
 
+	private bool playbackStoppedReentrantGuard = false;
+
 	private void PlaybackStopped(object sender, EventArgs e) {
+		if (playbackStoppedReentrantGuard)
+			return;
+		playbackStoppedReentrantGuard = true;
+
+		// Enqueue fires playback stopped event if the song failed to play
+		UpdateAutofillOnPlaybackStopped();
+
+		playbackStoppedReentrantGuard = false;
+	}
+
+	private void UpdateAutofillOnPlaybackStopped() {
 		if (playManager.Queue.Items.Count != playManager.Queue.Index || !AutofillEnabled) {
 			return;
 		}
