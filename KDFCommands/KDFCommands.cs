@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using System.Net.Http;
-using System.Runtime.InteropServices.WindowsRuntime;
 using System.Text;
 using System.Threading;
 using System.Text.RegularExpressions;
@@ -27,7 +26,6 @@ using TSLib;
 using TSLib.Full;
 using TSLib.Full.Book;
 using TSLib.Helper;
-using TSLib.Messages;
 
 public class KDFCommands : IBotPlugin {
 	private static readonly NLog.Logger Log = NLog.LogManager.GetCurrentClassLogger(); // TODO this does not get printed
@@ -94,7 +92,7 @@ public class KDFCommands : IBotPlugin {
 		public R<QueueItem, LocalStr> Next { get; set; }
 	}
 
-	private AutoFillData autofillData = null;
+	private AutoFillData autofillData;
 
 	private bool AutofillEnabled => autofillData != null;
 
@@ -119,10 +117,12 @@ public class KDFCommands : IBotPlugin {
 		playManager.OnPlaybackEnded();
 		commandManager.RegisterCollection(Bag);
 
-		if (!injector.TryGet(out voteData)) {
-			voteData = new VoteData(ts3Client, config);
-			injector.AddModule(voteData);
+		if (injector.TryGet(out voteData)) {
+			return;
 		}
+
+		voteData = new VoteData(ts3Client, config);
+		injector.AddModule(voteData);
 	}
 
 	public void Initialize() {
@@ -130,8 +130,9 @@ public class KDFCommands : IBotPlugin {
 		playManager.PlaybackStopped += PlaybackStopped;
 		playManager.ResourceStopped += OnResourceStopped;
 
-		descThread = new Thread(DescriptionUpdater);
-		descThread.IsBackground = true;
+		descThread = new Thread(DescriptionUpdater) {
+			IsBackground = true
+		};
 		running = true;
 		descThread.Start();
 	}
@@ -148,21 +149,29 @@ public class KDFCommands : IBotPlugin {
 	}
 
 	private void PlaybackStopped(object sender, EventArgs e) {
-		if (playManager.Queue.Items.Count == playManager.Queue.Index && AutofillEnabled) {
-			if (!ts3Client.IsDefinitelyAlone()) {
-				var result = PlayRandom();
-				if (!result.Ok) {
-					ts3Client.SendChannelMessage("Could not play a new autofill song: " + result.Error.Str);
-				} else {
-					return;
-				}
+		if (playManager.Queue.Items.Count != playManager.Queue.Index || !AutofillEnabled) {
+			return;
+		}
+
+		for (var i = 0; i < 10; i++) {
+			if (ts3Client.IsDefinitelyAlone()) {
+				return;
 			}
 
-			DisableAutofill();
+			var result = PlayRandom();
+			if (result.Ok) {
+				return;
+			}
+			
+			// Did not work, draw a new song.
+			DrawNextSong();
 		}
+
+		ts3Client.SendChannelMessage("Could not play a new autofill song after 10 tries. Disabling autofill.");
+		DisableAutofill();
 	}
 
-	private static R<(PlaylistInfo list, int offset)> FindSong(int index, ICollection<PlaylistInfo> playlists) {
+	private static R<(PlaylistInfo list, int offset)> FindSong(int index, IEnumerable<PlaylistInfo> playlists) {
 		foreach(var list in playlists) {
 			if (index < list.SongCount)
 				return (list, index);
@@ -202,7 +211,6 @@ public class KDFCommands : IBotPlugin {
 				throw new CommandException("Autofill: Could not find the song at index " + songIndex + ".", CommandExceptionReason.InternalError);
 
 			var (list, index) = infoOpt.Value;
-			Log.Info("Found the song {0} in playlist '{1}' at index {2}.", songIndex, list.Id, index);
 			var playlist = playlistManager.LoadPlaylist(list.Id).UnwrapThrow();
 
 			if(playlist.Items.Count != list.SongCount)
@@ -211,6 +219,7 @@ public class KDFCommands : IBotPlugin {
 			sIdx = index;
 			plId = list.Id;
 			resource = playlist.Items[index].AudioResource;
+			Log.Info("Found song index {0}: Song '{1}' in playlist '{2}' at index {3}.", songIndex, resource.ResourceTitle, list.Id, index);
 
 			// Check if the song was already played in the last 250 songs, if not take this one.
 			// If items.count < 250, the subtraction is negative, meaning that j == 0 will be reached first
@@ -218,11 +227,13 @@ public class KDFCommands : IBotPlugin {
 			var items = playManager.Queue.Items;
 			if (items.Count > 0) {
 				for (var j = items.Count - 1; j != 0 && j >= items.Count - 250; j--) {
-					if (items[j].AudioResource.Equals(resource)) {
-						Log.Info("The song {0} was already played {1} songs ago. Searching another one...", items[j].AudioResource.ResourceTitle,items.Count - j - 1);
-						foundDuplicate = true;
-						break;
+					if (!items[j].AudioResource.Equals(resource)) {
+						continue;
 					}
+
+					Log.Info("The song {0} was already played {1} songs ago. Searching another one...", items[j].AudioResource.ResourceTitle,items.Count - j - 1);
+					foundDuplicate = true;
+					break;
 				}
 			}
 
@@ -278,20 +289,21 @@ public class KDFCommands : IBotPlugin {
 	}
 
 	private static string GetClientNameFromUid(TsFullClient ts3FullClient, Uid? id) {
-		if (id.HasValue) {
-			if (id.Value.ToString() == "Anonymous") {
-				return GetClientNameFromUid(ts3FullClient, ts3FullClient.Identity.ClientUid);
-			} else {
-				return ts3FullClient.GetClientNameFromUid(id.Value).Value.Name;
-			}
-		} else {
+		if (!id.HasValue) {
 			return null;
 		}
+
+		if (id.Value.ToString() == "Anonymous") {
+			return ts3FullClient.GetClientNameFromUid(ts3FullClient.Identity.ClientUid).Value.Name;
+		}
+			
+		return ts3FullClient.GetClientNameFromUid(id.Value).Value.Name;
+
 	}
 
 	private static bool HasPlaylistId(PlayQueue queue, int index) {
 		string listId = queue.Items[index].MetaData.ContainingPlaylistId;
-		return listId != null && listId != "";
+		return !string.IsNullOrEmpty(listId);
 	}
 
 	private static string GetPlaylistId(PlayQueue queue, int index) {
@@ -338,7 +350,7 @@ public class KDFCommands : IBotPlugin {
 		// If yes, remember it as number as songs to randomly queue and the last array entry when iterating playlists.
 		int count = 1;
 		int numPlaylists = parts.Length;
-		if (Int32.TryParse(parts[parts.Length - 1], out int countOutput)) {
+		if (int.TryParse(parts[^1], out var countOutput)) {
 			// The only element is a number --> playlist name missing
 			if (parts.Length == 1) {
 				throw new CommandException("No playlist to add from given.", CommandExceptionReason.CommandError);
@@ -349,7 +361,9 @@ public class KDFCommands : IBotPlugin {
 
 			if (count < 0) {
 				throw new CommandException("You can't add a negative number of songs.", CommandExceptionReason.CommandError);
-			} else if (count == 0) {
+			}
+
+			if (count == 0) {
 				throw new CommandException("Adding no songs doesn't make any sense.", CommandExceptionReason.CommandError);
 			}
 		}
@@ -364,9 +378,9 @@ public class KDFCommands : IBotPlugin {
 				throw new CommandException("You need to add least at one song per playlist.", CommandExceptionReason.CommandError);
 		}
 
-		int numSongsAdded = 0;
+		var numSongsAdded = 0;
 		var allItems = new List<QueueItem>();
-		for (int i = 0; i < numPlaylists; i++) {
+		for (var i = 0; i < numPlaylists; i++) {
 			var plistId = parts[i];
 			var plist = playlistManager.LoadPlaylist(plistId).UnwrapThrow();
 			var items = new List<PlaylistItem>(plist.Items);
@@ -398,7 +412,7 @@ public class KDFCommands : IBotPlugin {
 			"." + (truncated ? TRUNCATED_MESSAGE : "");
 	}
 
-	public static void SendMessage(Ts3Client client, ClientCall cc, string message) {
+	private static void SendMessage(Ts3Client client, ClientCall cc, string message) {
 		if(cc.ClientId.HasValue)
 			client.SendMessage(message, cc.ClientId.Value);
 	}
@@ -423,7 +437,7 @@ public class KDFCommands : IBotPlugin {
 	}
 
 	private static void ParseMulti(
-		PartHandler ifURL,
+		PartHandler ifUrl,
 		PartHandler ifQuery,
 		PlayManager playManager,
 		PlaylistManager playlistManager,
@@ -443,7 +457,7 @@ public class KDFCommands : IBotPlugin {
 			// Check if URL
 			string query = part.Replace("[URL]", "").Replace("[/URL]", "").Trim(' ');
 			if (Regex.Match(query, YOUTUBE_URL_REGEX).Success) {
-				ifURL(playlistManager, playManager, execInfo, invoker, resolver, cc, ts3Client, query, target);
+				ifUrl(playlistManager, playManager, execInfo, invoker, resolver, cc, ts3Client, query, target);
 			} else {
 				ifQuery(playlistManager, playManager, execInfo, invoker, resolver, cc, ts3Client, query, target);
 			}
@@ -483,12 +497,14 @@ public class KDFCommands : IBotPlugin {
 		string query,
 		string target) {
 		var result = resolver.Search("youtube", query).UnwrapSendMessage(ts3Client, cc, query);
-		if (result != null) {
-			AudioResource audioResource = result[0];
-			if (playManager.Enqueue(audioResource, new MetaData(invoker.ClientUid))
-				.UnwrapSendMessage(ts3Client, cc, query)) {
-				PrintAddMessage(ts3Client, cc, playManager);
-			}
+		if (result == null) {
+			return;
+		}
+
+		AudioResource audioResource = result[0];
+		if (playManager.Enqueue(audioResource, new MetaData(invoker.ClientUid))
+			.UnwrapSendMessage(ts3Client, cc, query)) {
+			PrintAddMessage(ts3Client, cc, playManager);
 		}
 	}
 	
@@ -654,23 +670,26 @@ public class KDFCommands : IBotPlugin {
 		string query,
 		string target) {
 		var result = resolver.Search("youtube", query).UnwrapSendMessage(ts3Client, cc, query);
-		if (result != null) {
-			AudioResource audioResource = result[0];
-			int index;
-			try {
-				(_, index) = MainCommands.ListAddItem(playlistManager, info, target, audioResource);
-			} catch (CommandException e) {
-				SendMessage(ts3Client, cc, "Error occured for '" + query + "': " + e.Message);
-				return;
-			}
-
-			SendMessage(ts3Client, cc,
-				"Added '" + audioResource.ResourceTitle +
-				"' for your request '" + query +
-				"' to playlist '" + target +
-				"' at position " + index
-			);
+		
+		if (result == null) {
+			return;
 		}
+
+		AudioResource audioResource = result[0];
+		int index;
+		try {
+			(_, index) = MainCommands.ListAddItem(playlistManager, info, target, audioResource);
+		} catch (CommandException e) {
+			SendMessage(ts3Client, cc, "Error occured for '" + query + "': " + e.Message);
+			return;
+		}
+
+		SendMessage(ts3Client, cc,
+			"Added '" + audioResource.ResourceTitle +
+			"' for your request '" + query +
+			"' to playlist '" + target +
+			"' at position " + index
+		);
 	}
 
 	private static SortedSet<int> ParseIndicesInBounds(string indicesString, int lower, int upper) {
@@ -688,9 +707,9 @@ public class KDFCommands : IBotPlugin {
 			int end;
 			if (result.Success) {
 				// Range, parse it
-				start = Int32.Parse(result.Groups[1].Value);
-				end = Int32.Parse(result.Groups[2].Value);
-			} else if (Int32.TryParse(part, out int index)) {
+				start = int.Parse(result.Groups[1].Value);
+				end = int.Parse(result.Groups[2].Value);
+			} else if (int.TryParse(part, out int index)) {
 				start = end = index;
 			} else {
 				throw new CommandException("Invalid index: " + part, CommandExceptionReason.CommandError);
@@ -719,7 +738,7 @@ public class KDFCommands : IBotPlugin {
 		return indices;
 	}
 
-	private static SortedSet<int> parseAndMap(PlayQueue playQueue, string indicesString) {
+	private static SortedSet<int> ParseAndMap(PlayQueue playQueue, string indicesString) {
 		return new SortedSet<int>(ParseIndicesInBounds(indicesString, 1, playQueue.Items.Count - playQueue.Index - 1).Select(entry => entry + playQueue.Index));
 	}
 
@@ -735,7 +754,7 @@ public class KDFCommands : IBotPlugin {
 		List<(int, string)> succeded = new List<(int, string)>();
 		List<(int, string)> failed = new List<(int, string)>();
 		lock (playManager.Lock) {
-			SortedSet<int> indices = parseAndMap(queue, idList);
+			SortedSet<int> indices = ParseAndMap(queue, idList);
 
 			foreach (int index in indices.Reverse()) {
 				QueueItem item = queue.Items[index];
@@ -778,11 +797,11 @@ public class KDFCommands : IBotPlugin {
 		if (full && !info.HasRights(RightOverrideQueueCommandCheck))
 			throw new CommandException("You have no permission to view the full queue.",
 				CommandExceptionReason.CommandError);
-		return CommandQueueInternal(playManager, playlistManager, invoker, ts3FullClient, full);
+		return CommandQueueInternal(playManager, invoker, ts3FullClient, full);
 	}
 
 	private static string CommandQueueInternal(
-		PlayManager playManager, PlaylistManager playlistManager, InvokerData invoker, TsFullClient ts3FullClient,
+		PlayManager playManager, InvokerData invoker, TsFullClient ts3FullClient,
 		bool printAll) {
 		var queue = playManager.Queue;
 
@@ -878,7 +897,7 @@ public class KDFCommands : IBotPlugin {
 		AudioResource resource;
 
 		// Check if URL
-		string query = message.Replace("[URL]", "").Replace("[/URL]", "").Trim(' ');
+		var query = message.Replace("[URL]", "").Replace("[/URL]", "").Trim(' ');
 		if (Regex.Match(query, YOUTUBE_URL_REGEX).Success) {
 			resource = resolver.Load(query, "youtube").UnwrapThrow().BaseData;
 		} else {
@@ -899,7 +918,7 @@ public class KDFCommands : IBotPlugin {
 		return "Ok";
 	}
 
-	public static bool Matches(string item, string query) {
+	private static bool Matches(string item, string query) {
 		return !string.IsNullOrEmpty(item) && item.Contains(query);
 	}
 
@@ -993,7 +1012,7 @@ public class KDFCommands : IBotPlugin {
 			result += "enabled";
 
 			if(autofillData.Playlists != null) {
-				result += " using the playlists " + String.Join(", ", autofillData.Playlists) + ".";
+				result += " using the playlists " + string.Join(", ", autofillData.Playlists) + ".";
 			} else {
 				result += " using all playlists.";
 			}
@@ -1072,7 +1091,24 @@ public class KDFCommands : IBotPlugin {
 
 		// Only play a song if there is currently none playing
 		if (AutofillEnabled && !playManager.IsPlaying) {
-			PlayRandom().UnwrapThrow();
+			bool found = false;
+			for (var i = 0; i < 10; i++) {
+				var result = PlayRandom();
+				if (result.Ok) {
+					found = true;
+					break;
+				}
+				
+				// Did not work, draw new song.
+				DrawNextSong();
+			}
+
+			if (!found) {
+				// Could not successfully play a song after 10 tries
+				ts3Client.SendChannelMessage("Could not play a new autofill song after 10 tries. Disabling autofill.");
+				DisableAutofill();
+				return;
+			}
 		}
 
 		ts3Client.SendChannelMessage("[" + GetClientNameFromUid(ts3FullClient, invoker.ClientUid) + "] " + AutofillStatus("now"));
@@ -1110,7 +1146,7 @@ public class KDFCommands : IBotPlugin {
 				new KeyValuePair<string, AVotableCommand>("stop", EmptyArgsCommand.Instance),
 				new KeyValuePair<string, AVotableCommand>("clear", EmptyArgsCommand.Instance),
 				new KeyValuePair<string, AVotableCommand>("front", FrontCommand.Instance),
-				new KeyValuePair<string, AVotableCommand>("skip", SkipCommand.Instance),
+				new KeyValuePair<string, AVotableCommand>("skip", SkipCommand.Instance)
 			});
 
 		public class EmptyArgsCommand : AVotableCommand {
@@ -1215,18 +1251,19 @@ public class KDFCommands : IBotPlugin {
 				removeOnResourceEnded.Remove(vote);
 		}
 		public bool CheckAndFire(CurrentVoteData vote) {
-			if (vote.Needed <= vote.Voters.Count) {
-				client.SendChannelMessage($"Enough votes, executing \"{vote.Command}\"...");
-				
-				Remove(vote);
-				var res = ExecuteTryCatch(config, true, vote.Executor, err => client.SendChannelMessage(err).UnwrapToLog(Log));
-				if (!string.IsNullOrEmpty(res))
-					client.SendChannelMessage(res).UnwrapToLog(Log);
-
-				return true;
+			if (vote.Needed > vote.Voters.Count) {
+				return false;
 			}
 
-			return false;
+			client.SendChannelMessage($"Enough votes, executing \"{vote.Command}\"...");
+				
+			Remove(vote);
+			var res = ExecuteTryCatch(config, true, vote.Executor, err => client.SendChannelMessage(err).UnwrapToLog(Log));
+			if (!string.IsNullOrEmpty(res))
+				client.SendChannelMessage(res).UnwrapToLog(Log);
+
+			return true;
+
 		}
 	}
 
