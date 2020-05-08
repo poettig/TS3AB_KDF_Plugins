@@ -1105,9 +1105,6 @@ public class KDFCommands : IBotPlugin {
 					found = true;
 					break;
 				}
-				
-				// Did not work, draw new song.
-				DrawNextSong();
 			}
 
 			if (!found) {
