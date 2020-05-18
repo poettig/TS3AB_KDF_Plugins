@@ -168,6 +168,7 @@ public class KDFCommands : IBotPlugin {
 
 		for (var i = 0; i < 10; i++) {
 			if (ts3Client.IsDefinitelyAlone()) {
+				DisableAutofill();
 				return;
 			}
 
@@ -754,11 +755,12 @@ public class KDFCommands : IBotPlugin {
 		PlayManager playManager, ExecutionInformation info, InvokerData invoker, ClientCall cc,
 		Ts3Client ts3Client, string idList) {
 		var queue = playManager.Queue;
+		var currentSongIndex = queue.Index;
 
 		// Parse id list and map to real ids. Throws CommandException when one does not exist or there is a syntax error.
 		// Set because duplicates should be ignored
 
-		List<(int, string)> succeded = new List<(int, string)>();
+		List<(int, string)> succeeded = new List<(int, string)>();
 		List<(int, string)> failed = new List<(int, string)>();
 		lock (playManager.Lock) {
 			SortedSet<int> indices = ParseAndMap(queue, idList);
@@ -767,27 +769,30 @@ public class KDFCommands : IBotPlugin {
 				QueueItem item = queue.Items[index];
 				if (invoker.ClientUid == item.MetaData.ResourceOwnerUid || info.HasRights(RightDeleteOther)) {
 					queue.Remove(index);
-					succeded.Add((index, item.AudioResource.ResourceTitle));
+					succeeded.Add((index - currentSongIndex, item.AudioResource.ResourceTitle));
 				} else {
-					failed.Add((index, item.AudioResource.ResourceTitle));
+					failed.Add((index - currentSongIndex, item.AudioResource.ResourceTitle));
 				}
 			}
 		}
 
+		succeeded.Reverse();
+		failed.Reverse();
+		
 		StringBuilder output = new StringBuilder();
-		if (succeded.Count > 0) {
+		if (succeeded.Count > 0) {
 			output.Append("Removed the following songs:");
-			foreach ((int index, string title) in succeded) {
+			foreach ((int index, string title) in succeeded) {
 				output.Append('\n');
 				output.Append('[').Append(index).Append("] ").Append(title);
 			}
 		}
 
 		if (failed.Count > 0) {
-			if (succeded.Count > 0)
+			if (succeeded.Count > 0)
 				output.Append('\n');
 			output.Append("Failed to remove the following songs:");
-			foreach ((int index, string title) in succeded) {
+			foreach ((int index, string title) in failed) {
 				output.Append('\n');
 				output.Append('[').Append(index).Append("] ").Append(title);
 			}
@@ -1036,19 +1041,37 @@ public class KDFCommands : IBotPlugin {
 	}
 
 	[Command("autofillstatus")]
-	public string CommandAutofillStatus(string[] parts = null) {
+	public string CommandAutofillStatus() {
 		return AutofillStatus("currently");
 	}
-	
+
 	[Command("autofilloff")]
-	public void CommandAutofillOff(string[] parts = null) {
+	private void CommandAutofillOff(InvokerData invoker) {
+		CommandAutofillOffInternal(invoker.ClientUid);
+	}
+
+	[Command("autofilloffbyuid")]
+	private void CommandAutofillOffByUid(string uid) {
+		CommandAutofillOffInternal(Uid.To(uid));
+	}
+
+	private void CommandAutofillOffInternal(Uid uid) {
 		// Explicitly requested to turn it off
 		DisableAutofill();
-		ts3Client.SendChannelMessage(AutofillStatus("now"));
+		ts3Client.SendChannelMessage("[" + GetClientNameFromUid(ts3FullClient, uid) + "] " + AutofillStatus("now"));
 	}
 
 	[Command("autofill")]
 	public void CommandAutofill(InvokerData invoker, string[] playlistIds = null) {
+		CommandAutofillInternal(invoker.ClientUid, playlistIds);
+	}
+
+	[Command("autofillbyuid")]
+	public void CommandAutofillByUid(InvokerData invoker, string uid, string[] playlistIds = null) {
+		CommandAutofillInternal(Uid.To(uid), playlistIds);
+	}
+	
+	private void CommandAutofillInternal(Uid uid, string[] playlistIds = null) {
 		// Check if all playlists exist, otherwise throw exception
 		if (playlistIds != null) {
 			for (int i = 0; i < playlistIds.Length; ++i) {
@@ -1115,7 +1138,7 @@ public class KDFCommands : IBotPlugin {
 			}
 		}
 
-		ts3Client.SendChannelMessage("[" + GetClientNameFromUid(ts3FullClient, invoker.ClientUid) + "] " + AutofillStatus("now"));
+		ts3Client.SendChannelMessage("[" + GetClientNameFromUid(ts3FullClient, uid) + "] " + AutofillStatus("now"));
 	}
 
 	public static class VotableCommands {
