@@ -854,6 +854,27 @@ public class KDFCommands : IBotPlugin {
 		return new JsonValue<CurrentQueueInfo>(queueInfo, QueueInfoToString);
 	}
 
+	[Command("recentlyplayed")]
+	public JsonArray<QueueItemInfo> CommandRecentlyPlayed(PlayManager playManager, ExecutionInformation info, InvokerData invoker, int? count) {
+		List<QueueItemInfo> items;
+		lock (playManager) {
+			int start = Math.Max(0, playManager.Queue.Index - count ?? 5);
+			var take = playManager.Queue.Index - start;
+			items = playManager.Queue.Items.Skip(start).Take(take).Select(ToQueueItemInfo).ToList();
+		}
+		return new JsonArray<QueueItemInfo>(items, infos => {
+			var builder = new StringBuilder();
+			for (int i = 0; i < infos.Count; ++i) {
+				if (i != 0)
+					builder.AppendLine();
+				builder.Append("[-").Append(infos.Count - i).Append("] ");
+				AppendSong(builder, infos[i], false);
+			}
+
+			return builder.ToString();
+		});
+	}
+
 	[Command("skip")]
 	public static string CommandSkip(
 		PlayManager playManager,
