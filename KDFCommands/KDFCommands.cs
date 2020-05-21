@@ -7,6 +7,7 @@ using System.Text;
 using System.Threading;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using TS3AudioBot;
 using TS3AudioBot.Audio;
@@ -308,29 +309,12 @@ public class KDFCommands : IBotPlugin {
 
 	}
 
-	private static bool HasPlaylistId(PlayQueue queue, int index) {
-		string listId = queue.Items[index].MetaData.ContainingPlaylistId;
-		return !string.IsNullOrEmpty(listId);
-	}
-
-	private static string GetPlaylistId(PlayQueue queue, int index) {
-		return queue.Items[index].MetaData.ContainingPlaylistId;
-	}
-
-	private static string GetTitle(PlayQueue queue, int index) {
-		return queue.Items[index].AudioResource.ResourceTitle;
-	}
-
-	private static string GetTitle(IReadOnlyPlaylist queue, int index) {
-		return queue.Items[index].AudioResource.ResourceTitle;
-	}
-
-	private static string GetName(PlayQueue queue, int index, TsFullClient ts3FullClient) {
-		if (queue.Items[index].MetaData.ResourceOwnerUid?.Value == "Anonymous") {
+	private static string GetUserNameOrBotName(string userId, TsFullClient ts3FullClient) {
+		if (userId == null) {
 			return GetClientNameFromUid(ts3FullClient, ts3FullClient.Identity.ClientUid);
 		}
 
-		return GetClientNameFromUid(ts3FullClient, queue.Items[index].MetaData.ResourceOwnerUid);
+		return GetClientNameFromUid(ts3FullClient, new Uid(userId));
 	}
 
 	private static void Shuffle<T>(IList<T> list, Random rng) {
@@ -796,56 +780,78 @@ public class KDFCommands : IBotPlugin {
 		SendMessage(ts3Client, cc, output.ToString());
 	}
 
-	[Command("queue")]
-	public static string CommandQueue(
-		PlayManager playManager, PlaylistManager playlistManager, ExecutionInformation info, InvokerData invoker,
-		TsFullClient ts3FullClient, string arg = null) {
-		bool full = arg == "full";
-		if (full && !info.HasRights(RightOverrideQueueCommandCheck))
-			throw new CommandException("You have no permission to view the full queue.",
-				CommandExceptionReason.CommandError);
-		return CommandQueueInternal(playManager, invoker, ts3FullClient, full);
+	public class QueueItemInfo {
+		[JsonProperty(PropertyName = "Title")]
+		public string Title { get; set; }
+		[JsonProperty(PropertyName = "UserId")]
+		public string UserId { get; set; }
+		[JsonProperty(PropertyName = "ContainingListId")]
+		public string ContainingListId { get; set; }
 	}
 
-	private static string CommandQueueInternal(
-		PlayManager playManager, InvokerData invoker, TsFullClient ts3FullClient,
-		bool printAll) {
-		var queue = playManager.Queue;
+	public class CurrentQueueInfo {
+		[JsonProperty(PropertyName = "Current")]
+		public QueueItemInfo Current { get; set; }
+		[JsonProperty(PropertyName = "Items")]
+		public List<QueueItemInfo> Items { get; set; }
+		[JsonProperty(PropertyName = "Restricted")]
+		public bool Restricted { get; set; }
+		[JsonProperty(PropertyName = "CallerId")]
+		public string CallerId { get; set; }
+	}
 
-		if (queue.Items.Count == 0) {
+	private void AppendSong(StringBuilder target, QueueItemInfo qi, bool restrict) {
+		target.Append(restrict ? "Hidden Song Name" : qi.Title);
+		target.Append(" - ").Append(GetUserNameOrBotName(qi.UserId, ts3FullClient));
+
+		if (qi.ContainingListId != null) 
+			target.Append(" <Playlist: ").Append(qi.ContainingListId).Append(">");
+	}
+
+	private string QueueInfoToString(CurrentQueueInfo queueInfo) {
+		if (queueInfo.Current == null) {
 			return "There is nothing on right now...";
 		}
 
-		string output = "";
-		if (playManager.IsPlaying) {
-			output +=
-				"Current song: " + GetTitle(queue, queue.Index) +
-				" - " + GetName(queue, queue.Index, ts3FullClient);
-			if (HasPlaylistId(queue, queue.Index)) {
-			   	output += " <Playlist: " + GetPlaylistId(queue, queue.Index) + ">";
-			}
+		var output = new StringBuilder();
+		if (queueInfo.Current != null) {
+			output.Append("Current song: ");
+			AppendSong(output, queueInfo.Current, false);
 		}
 
-		for (int i = queue.Index + 1; i < queue.Items.Count; i++) {
-			if (printAll || queue.Items[i].MetaData.ResourceOwnerUid == invoker.ClientUid) {
-				output +=
-					"\n[" + (i - queue.Index) +
-					"] " + GetTitle(queue, i) +
-					" - " + GetName(queue, i, ts3FullClient);
-				if (HasPlaylistId(queue, i)) {
-					output += " <Playlist: " + GetPlaylistId(queue, i) + ">";
-				}
-			} else {
-				output +=
-					"\n[" + (i - queue.Index) +
-					"] Hidden Song Name - " + GetName(queue, i, ts3FullClient);
-				if (HasPlaylistId(queue, i)) {
-					output += " <Playlist: Hidden>";
-				}
-			}
+		for (var index = 0; index < queueInfo.Items.Count; index++) {
+			var item = queueInfo.Items[index];
+			output.AppendLine();
+			output.Append('[').Append(index).Append("] ");
+			AppendSong(output, item, queueInfo.Restricted || item.UserId != queueInfo.CallerId);
 		}
 
-		return output;
+		return output.ToString();
+	}
+
+	private static QueueItemInfo ToQueueItemInfo(QueueItem qi) {
+		return new QueueItemInfo {
+			ContainingListId = qi.MetaData.ContainingPlaylistId,
+			Title = qi.AudioResource.ResourceTitle,
+			UserId = qi.MetaData.ResourceOwnerUid.GetValueOrDefault(Uid.Null).Value
+		};
+	}
+
+	[Command("queue")]
+	public JsonValue<CurrentQueueInfo> CommandQueue(PlayManager playManager, ExecutionInformation info, InvokerData invoker, string arg = null) {
+		bool full = arg == "full";
+		if (full && !info.HasRights(RightOverrideQueueCommandCheck))
+			throw new CommandException("You have no permission to view the full queue.", CommandExceptionReason.CommandError);
+		var queueInfo = new CurrentQueueInfo {
+			Restricted = full,
+			CallerId = invoker.IsAnonymous ? null : invoker.ClientUid.Value
+		};
+		lock (playManager) {
+			queueInfo.Items = playManager.Queue.Items.Skip(playManager.Queue.Index + 1).Select(ToQueueItemInfo).ToList();
+			if(playManager.IsPlaying)
+				queueInfo.Current = ToQueueItemInfo(playManager.Queue.Current);
+		}
+		return new JsonValue<CurrentQueueInfo>(queueInfo, QueueInfoToString);
 	}
 
 	[Command("skip")]
