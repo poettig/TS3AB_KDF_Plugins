@@ -53,7 +53,7 @@ public class KDFCommands : IBotPlugin {
 
 	private static readonly TimeSpan MinIdleTimeForVoteIgnore = TimeSpan.FromMinutes(10);
 
-	private delegate void PartHandler(
+	private delegate string PartHandler(
 		PlaylistManager playlistManager,
 		PlayManager playManager,
 		ExecutionInformation info,
@@ -61,8 +61,11 @@ public class KDFCommands : IBotPlugin {
 		ResolveContext resolver,
 		ClientCall cc,
 		Ts3Client ts3Client,
+		TsFullClient tsFullClient,
 		string query,
-		string target
+		string target = null,
+		bool silent = false,
+		string uidStr = null
 	);
 
 	private Thread descThread;
@@ -302,11 +305,18 @@ public class KDFCommands : IBotPlugin {
 			return null;
 		}
 
+		Uid uid;
 		if (id.Value.ToString() == "Anonymous") {
-			return ts3FullClient.GetClientNameFromUid(ts3FullClient.Identity.ClientUid).Value.Name;
+			uid = ts3FullClient.Identity.ClientUid;
+		} else {
+			uid = id.Value;
 		}
-			
-		return ts3FullClient.GetClientNameFromUid(id.Value).Value.Name;
+
+		var result = ts3FullClient.GetClientNameFromUid(uid);
+		if (!result.Ok) {
+			throw new CommandException($"The UID '{id}' does not exist on this server.", CommandExceptionReason.CommandError);
+		}
+		return result.Value.Name;
 
 	}
 
@@ -408,6 +418,15 @@ public class KDFCommands : IBotPlugin {
 		if(cc.ClientId.HasValue)
 			client.SendMessage(message, cc.ClientId.Value);
 	}
+	
+	private static void checkOnlineThrow(TsFullClient ts3FullClient, string uidStr) {
+		if (!CommandCheckUserOnlineByUid(ts3FullClient, uidStr)) {
+			throw new CommandException(
+				$"The user with UID '{uidStr}' is not online and therefore not allowed to use this command.",
+				CommandExceptionReason.Unauthorized
+			);
+		}
+	}
 
 	[Command("youtube")]
 	public static void CommandYoutube(
@@ -418,14 +437,35 @@ public class KDFCommands : IBotPlugin {
 		InvokerData invoker,
 		ClientCall cc,
 		Ts3Client ts3Client,
+		TsFullClient ts3FullClient,
 		string message) {
 		string[] parts = Regex.Split(message, ";+");
+		
 		SendMessage(ts3Client, cc, "Received your request to add " + parts.Length + " songs, processing...");
 
 		PartHandler urlHandler = AddUrl;
 		PartHandler queryHandler = AddQuery;
-		ParseMulti(urlHandler, queryHandler, playManager, playlistManager, execInfo, resolver, invoker, cc, ts3Client,
-			parts, "");
+		ParseMulti(urlHandler, queryHandler, playManager, playlistManager, execInfo, resolver, invoker, cc, ts3Client, ts3FullClient, parts, "");
+	}
+	
+	[Command("youtubebyuid")]
+	public static string CommandYoutubeByUid(
+		PlayManager playManager,
+		PlaylistManager playlistManager,
+		ExecutionInformation execInfo,
+		ResolveContext resolver,
+		InvokerData invoker,
+		Ts3Client ts3Client,
+		TsFullClient ts3FullClient,
+		string uidStr,
+		string message) {
+
+		string query = message.Replace("[URL]", "").Replace("[/URL]", "").Trim(' ');
+		if (Regex.Match(query, YOUTUBE_URL_REGEX).Success) {
+			return AddUrl(playlistManager, playManager, execInfo, invoker, resolver, null, ts3Client, ts3FullClient, query, silent: true, uidStr: uidStr);
+		} else {
+			return AddQuery(playlistManager, playManager, execInfo, invoker, resolver, null, ts3Client, ts3FullClient, query, silent: true, uidStr: uidStr);
+		}
 	}
 
 	private static void ParseMulti(
@@ -438,6 +478,7 @@ public class KDFCommands : IBotPlugin {
 		InvokerData invoker,
 		ClientCall cc,
 		Ts3Client ts3Client,
+		TsFullClient ts3FullClient,
 		string[] parts,
 		string target) {
 		foreach (string part in parts) {
@@ -449,36 +490,34 @@ public class KDFCommands : IBotPlugin {
 			// Check if URL
 			string query = part.Replace("[URL]", "").Replace("[/URL]", "").Trim(' ');
 			if (Regex.Match(query, YOUTUBE_URL_REGEX).Success) {
-				ifUrl(playlistManager, playManager, execInfo, invoker, resolver, cc, ts3Client, query, target);
+				ifUrl(playlistManager, playManager, execInfo, invoker, resolver, cc, ts3Client, ts3FullClient, query, target);
 			} else {
-				ifQuery(playlistManager, playManager, execInfo, invoker, resolver, cc, ts3Client, query, target);
+				ifQuery(playlistManager, playManager, execInfo, invoker, resolver, cc, ts3Client, ts3FullClient, query, target);
 			}
 		}
 	}
 
-	private static void PrintAddMessage(Ts3Client ts3Client, ClientCall cc, PlayManager playManager) {
+	private static string ComposeAddMessage(PlayManager playManager) {
 		PlayQueue queue = playManager.Queue;
 		int realIndex = queue.Items.Count - 1;
 		int index = realIndex - queue.Index;
-		SendMessage(ts3Client, cc, "Added '" + queue.Items[realIndex].AudioResource.ResourceTitle + "' at queue position " + index); // This will fail if async
+		return "Added '" + queue.Items[realIndex].AudioResource.ResourceTitle + "' at queue position " + index;
 	}
 
-	private static void AddUrl(
-		PlaylistManager playlistManager,
-		PlayManager playManager,
-		ExecutionInformation info,
-		InvokerData invoker,
-		ResolveContext resolver,
-		ClientCall cc,
-		Ts3Client ts3Client,
-		string url,
-		string target) {
-		if (playManager.Enqueue(url, new MetaData(invoker.ClientUid)).UnwrapSendMessage(ts3Client, cc, url)) {
-			PrintAddMessage(ts3Client, cc, playManager);
+	private static void PrintAddMessage(Ts3Client ts3Client, ClientCall cc, PlayManager playManager) {
+		SendMessage(ts3Client, cc, ComposeAddMessage(playManager)); // This will fail if async
+	}
+
+	private static Uid GetRelevantUid(TsFullClient ts3FullClient, InvokerData invoker, string uidStr) {
+		if (uidStr != null) {
+			checkOnlineThrow(ts3FullClient, uidStr);
+			return Uid.To(uidStr);
+		} else {
+			return invoker.ClientUid;
 		}
 	}
 
-	private static void AddQuery(
+	private static string AddUrl(
 		PlaylistManager playlistManager,
 		PlayManager playManager,
 		ExecutionInformation info,
@@ -486,18 +525,81 @@ public class KDFCommands : IBotPlugin {
 		ResolveContext resolver,
 		ClientCall cc,
 		Ts3Client ts3Client,
+		TsFullClient ts3FullClient,
+		string url,
+		string target = null,
+		bool silent = false,
+		string uidStr = null) {
+
+		Uid uid = GetRelevantUid(ts3FullClient, invoker, uidStr);
+		
+		if (silent) {
+			playManager.Enqueue(url, new MetaData(uid)).UnwrapThrow();
+			return ComposeAddMessage(playManager);
+        }
+
+		if (cc == null) {
+			throw new CommandException(
+				"Tried to call AddURL with invalid parameter combination 'cc == null' and 'silent == false'.",
+				CommandExceptionReason.CommandError
+			);
+		}
+
+		if (playManager.Enqueue(url, new MetaData(uid)).UnwrapSendMessage(ts3Client, cc, url)) {
+			PrintAddMessage(ts3Client, cc, playManager);
+		}
+
+		// Only reached of not silent.
+		return null;
+	}
+
+	private static string AddQuery(
+		PlaylistManager playlistManager,
+		PlayManager playManager,
+		ExecutionInformation info,
+		InvokerData invoker,
+		ResolveContext resolver,
+		ClientCall cc,
+		Ts3Client ts3Client,
+		TsFullClient ts3FullClient,
 		string query,
-		string target) {
-		var result = resolver.Search("youtube", query).UnwrapSendMessage(ts3Client, cc, query);
+		string target = null,
+		bool silent = false,
+		string uidStr = null) {
+
+		Uid uid = GetRelevantUid(ts3FullClient, invoker, uidStr);
+
+		IList<AudioResource> result = null;
+		if (silent) {
+			result = resolver.Search("youtube", query).UnwrapThrow();
+		} else {
+			if (cc == null) {
+				throw new CommandException(
+					"Tried to call AddQuery with invalid parameter combination 'cc == null' and 'silent == false'.",
+					CommandExceptionReason.CommandError
+				);
+			}
+			
+			result = resolver.Search("youtube", query).UnwrapSendMessage(ts3Client, cc, query);
+		}
+		
+		// Will not be reached if silent is marked and the search failed because of UnwrapThrow()
 		if (result == null) {
-			return;
+			return null;
 		}
 
 		AudioResource audioResource = result[0];
-		if (playManager.Enqueue(audioResource, new MetaData(invoker.ClientUid))
-			.UnwrapSendMessage(ts3Client, cc, query)) {
+		if (silent) {
+			playManager.Enqueue(audioResource, new MetaData(uid)).UnwrapThrow();
+			return ComposeAddMessage(playManager);
+		}
+		
+		if (playManager.Enqueue(audioResource, new MetaData(uid)).UnwrapSendMessage(ts3Client, cc, query)) {
 			PrintAddMessage(ts3Client, cc, playManager);
 		}
+
+		// Only reached if not silent
+		return null;
 	}
 	
 	public class LoggingHandler : DelegatingHandler
@@ -540,6 +642,7 @@ public class KDFCommands : IBotPlugin {
 		ResolveContext resolver,
 		ClientCall cc,
 		Ts3Client ts3Client,
+		TsFullClient ts3FullClient,
 		string username,
 		string playlistName,
 		string oauth) {
@@ -594,6 +697,7 @@ public class KDFCommands : IBotPlugin {
 					resolver,
 					cc,
 					ts3Client,
+					ts3FullClient,
 					title + " " + string.Join(" ", artists),
 					pNameInternal
 				);
@@ -612,6 +716,7 @@ public class KDFCommands : IBotPlugin {
 		InvokerData invoker,
 		ClientCall cc,
 		Ts3Client ts3Client,
+		TsFullClient ts3FullClient,
 		string listId,
 		string message) {
 		string[] parts = Regex.Split(message, ";+");
@@ -619,11 +724,10 @@ public class KDFCommands : IBotPlugin {
 
 		PartHandler urlHandler = ListAddUrl;
 		PartHandler queryHandler = ListAddQuery;
-		ParseMulti(urlHandler, queryHandler, playManager, playlistManager, execInfo, resolver, invoker, cc, ts3Client,
-			parts, listId);
+		ParseMulti(urlHandler, queryHandler, playManager, playlistManager, execInfo, resolver, invoker, cc, ts3Client, ts3FullClient, parts, listId);
 	}
 
-	private static void ListAddUrl(
+	private static string ListAddUrl(
 		PlaylistManager playlistManager,
 		PlayManager playManager,
 		ExecutionInformation info,
@@ -631,8 +735,12 @@ public class KDFCommands : IBotPlugin {
 		ResolveContext resolver,
 		ClientCall cc,
 		Ts3Client ts3Client,
+		TsFullClient ts3FullClient,
 		string url,
-		string target) {
+		string target = null,
+		bool silent = false,
+		string uidStr = null) {
+		
 		int index;
 		string title;
 		try {
@@ -641,7 +749,7 @@ public class KDFCommands : IBotPlugin {
 			(_, index) = MainCommands.ListAddItem(playlistManager, info, target, playResource.BaseData);
 		} catch (CommandException e) {
 			SendMessage(ts3Client, cc, "Error occured for '" + url + "': " + e.Message);
-			return;
+			return null;
 		}
 
 		SendMessage(ts3Client, cc,
@@ -649,9 +757,11 @@ public class KDFCommands : IBotPlugin {
 			"' to playlist '" + target +
 			"' at position " + index
 		);
+
+		return null;
 	}
 
-	private static void ListAddQuery(
+	private static string ListAddQuery(
 		PlaylistManager playlistManager,
 		PlayManager playManager,
 		ExecutionInformation info,
@@ -659,12 +769,16 @@ public class KDFCommands : IBotPlugin {
 		ResolveContext resolver,
 		ClientCall cc,
 		Ts3Client ts3Client,
+		TsFullClient ts3FullClient,
 		string query,
-		string target) {
+		string target = null,
+		bool silent = false,
+		string uidStr = null) {
+		
 		var result = resolver.Search("youtube", query).UnwrapSendMessage(ts3Client, cc, query);
 		
 		if (result == null) {
-			return;
+			return null;
 		}
 
 		AudioResource audioResource = result[0];
@@ -673,7 +787,7 @@ public class KDFCommands : IBotPlugin {
 			(_, index) = MainCommands.ListAddItem(playlistManager, info, target, audioResource);
 		} catch (CommandException e) {
 			SendMessage(ts3Client, cc, "Error occured for '" + query + "': " + e.Message);
-			return;
+			return null;
 		}
 
 		SendMessage(ts3Client, cc,
@@ -682,6 +796,8 @@ public class KDFCommands : IBotPlugin {
 			"' to playlist '" + target +
 			"' at position " + index
 		);
+
+		return null;
 	}
 
 	private static SortedSet<int> ParseIndicesInBounds(string indicesString, int lower, int upper) {
@@ -827,8 +943,8 @@ public class KDFCommands : IBotPlugin {
 		for (var index = 0; index < queueInfo.Items.Count; index++) {
 			var item = queueInfo.Items[index];
 			output.AppendLine();
-			output.Append('[').Append(index).Append("] ");
-			AppendSong(output, item, queueInfo.Restricted || item.UserId != queueInfo.CallerId);
+			output.Append('[').Append(index + 1).Append("] ");
+			AppendSong(output, item, queueInfo.Restricted && item.UserId != queueInfo.CallerId);
 		}
 
 		return output.ToString();
@@ -842,14 +958,34 @@ public class KDFCommands : IBotPlugin {
 		};
 	}
 
+	[Command("queuewithuid")]
+	public JsonValue<CurrentQueueInfo> CommandQueueWithUid(
+		ExecutionInformation info,
+		InvokerData invoker,
+		string uidStr) { 
+		
+		// Check if user exists, throws exception if not.
+		GetClientNameFromUid(ts3FullClient, Uid.To(uidStr));
+		return CommandQueueInternal(info, invoker, uidStr);
+	}
+
 	[Command("queue")]
-	public JsonValue<CurrentQueueInfo> CommandQueue(PlayManager playManager, ExecutionInformation info, InvokerData invoker, string arg = null) {
-		bool full = arg == "full";
-		if (full && !info.HasRights(RightOverrideQueueCommandCheck))
+	public JsonValue<CurrentQueueInfo> CommandQueue(
+		ExecutionInformation info,
+		InvokerData invoker, 
+		string arg = null) {
+		
+		string uid = invoker.IsAnonymous ? null : invoker.ClientUid.Value;
+		return CommandQueueInternal(info, invoker, uid, arg);
+	}
+
+	public JsonValue<CurrentQueueInfo> CommandQueueInternal(ExecutionInformation info, InvokerData invoker, string uid, string arg = null) {
+		bool restricted = arg != "full";
+		if (!restricted && !info.HasRights(RightOverrideQueueCommandCheck))
 			throw new CommandException("You have no permission to view the full queue.", CommandExceptionReason.CommandError);
 		var queueInfo = new CurrentQueueInfo {
-			Restricted = full,
-			CallerId = invoker.IsAnonymous ? null : invoker.ClientUid.Value
+			Restricted = restricted,
+			CallerId = uid
 		};
 		lock (playManager) {
 			queueInfo.Items = playManager.Queue.Items.Skip(playManager.Queue.Index + 1).Select(ToQueueItemInfo).ToList();
@@ -917,12 +1053,13 @@ public class KDFCommands : IBotPlugin {
 		InvokerData invoker,
 		ClientCall cc,
 		Ts3Client ts3Client,
+		TsFullClient ts3FullClient,
 		string message) {
 		// If the current song is the last in the queue, add normally
 		var queue = playManager.Queue;
 
 		if (queue.Index == queue.Items.Count || queue.Index == queue.Items.Count - 1) {
-			CommandYoutube(playManager, playlistManager, execInfo, resolver, invoker, cc, ts3Client, message);
+			CommandYoutube(playManager, playlistManager, execInfo, resolver, invoker, cc, ts3Client, ts3FullClient, message);
 			return null;
 		}
 
@@ -1031,11 +1168,15 @@ public class KDFCommands : IBotPlugin {
 		items.AddRange(indices.Select(index => plist.Items[index]));
 
 		playManager.Enqueue(items.Select(item => item.AudioResource), new MetaData(uid != null ? Uid.To(uid) : invoker.ClientUid, listId)).UnwrapThrow();
+
+		if (indices.Count == 1) {
+			return $"Queued '{items[0].AudioResource.ResourceTitle}' from playlist {plist.Title}.";
+		}
 		return $"Queued {items.Count} items from playlist {plist.Title}.";
 	}
 
 	[Command("checkuser online byuid")]
-	public static bool CommandCheckUserByUid(TsFullClient ts3FullClient, string uid) {
+	public static bool CommandCheckUserOnlineByUid(TsFullClient ts3FullClient, string uid) {
 		var result = ts3FullClient.ClientList(ClientListOptions.uid);
 		if (!result) {
 			return false;
@@ -1094,8 +1235,9 @@ public class KDFCommands : IBotPlugin {
 	}
 
 	[Command("autofillbyuid")]
-	public void CommandAutofillByUid(InvokerData invoker, string uid, string[] playlistIds = null) {
-		CommandAutofillInternal(Uid.To(uid), playlistIds);
+	public void CommandAutofillByUid(InvokerData invoker, string uidStr, string[] playlistIds = null) {
+		checkOnlineThrow(ts3FullClient, uidStr);
+		CommandAutofillInternal(Uid.To(uidStr), playlistIds);
 	}
 	
 	private void CommandAutofillInternal(Uid uid, string[] playlistIds = null) {
