@@ -915,10 +915,6 @@ public class KDFCommands : IBotPlugin {
 		public QueueItemInfo Current { get; set; }
 		[JsonProperty(PropertyName = "Items")]
 		public List<QueueItemInfo> Items { get; set; }
-		[JsonProperty(PropertyName = "Restricted")]
-		public bool Restricted { get; set; }
-		[JsonProperty(PropertyName = "CallerId")]
-		public string CallerId { get; set; }
 	}
 
 	private void AppendSong(StringBuilder target, QueueItemInfo qi, bool restrict) {
@@ -944,16 +940,16 @@ public class KDFCommands : IBotPlugin {
 			var item = queueInfo.Items[index];
 			output.AppendLine();
 			output.Append('[').Append(index + 1).Append("] ");
-			AppendSong(output, item, queueInfo.Restricted && item.UserId != queueInfo.CallerId);
+			AppendSong(output, item, item.Title == null);
 		}
 
 		return output.ToString();
 	}
 
-	private static QueueItemInfo ToQueueItemInfo(QueueItem qi) {
+	private static QueueItemInfo ToQueueItemInfo(QueueItem qi, bool restrict) {
 		return new QueueItemInfo {
 			ContainingListId = qi.MetaData.ContainingPlaylistId,
-			Title = qi.AudioResource.ResourceTitle,
+			Title = restrict ? null : qi.AudioResource.ResourceTitle,
 			UserId = qi.MetaData.ResourceOwnerUid.GetValueOrDefault(Uid.Null).Value
 		};
 	}
@@ -983,14 +979,11 @@ public class KDFCommands : IBotPlugin {
 		bool restricted = arg != "full";
 		if (!restricted && !info.HasRights(RightOverrideQueueCommandCheck))
 			throw new CommandException("You have no permission to view the full queue.", CommandExceptionReason.CommandError);
-		var queueInfo = new CurrentQueueInfo {
-			Restricted = restricted,
-			CallerId = uid
-		};
+		var queueInfo = new CurrentQueueInfo();
 		lock (playManager) {
-			queueInfo.Items = playManager.Queue.Items.Skip(playManager.Queue.Index + 1).Select(ToQueueItemInfo).ToList();
+			queueInfo.Items = playManager.Queue.Items.Skip(playManager.Queue.Index + 1).Select(qi => ToQueueItemInfo(qi, qi.MetaData.ResourceOwnerUid == invoker.ClientUid)).ToList();
 			if(playManager.IsPlaying)
-				queueInfo.Current = ToQueueItemInfo(playManager.Queue.Current);
+				queueInfo.Current = ToQueueItemInfo(playManager.Queue.Current, false);
 		}
 		return new JsonValue<CurrentQueueInfo>(queueInfo, QueueInfoToString);
 	}
@@ -1001,7 +994,7 @@ public class KDFCommands : IBotPlugin {
 		lock (playManager) {
 			int start = Math.Max(0, playManager.Queue.Index - count ?? 5);
 			var take = playManager.Queue.Index - start;
-			items = playManager.Queue.Items.Skip(start).Take(take).Select(ToQueueItemInfo).ToList();
+			items = playManager.Queue.Items.Skip(start).Take(take).Select(qi => ToQueueItemInfo(qi, false)).ToList();
 		}
 		return new JsonArray<QueueItemInfo>(items, infos => {
 			var builder = new StringBuilder();
