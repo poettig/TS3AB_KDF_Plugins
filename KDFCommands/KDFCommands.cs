@@ -961,8 +961,9 @@ public class KDFCommands : IBotPlugin {
 		string uidStr) { 
 		
 		// Check if user exists, throws exception if not.
-		GetClientNameFromUid(ts3FullClient, Uid.To(uidStr));
-		return CommandQueueInternal(info, invoker, uidStr);
+		var uid = Uid.To(uidStr);
+		GetClientNameFromUid(ts3FullClient, uid);
+		return CommandQueueInternal(info, uid, uidStr);
 	}
 
 	[Command("queue")]
@@ -970,18 +971,16 @@ public class KDFCommands : IBotPlugin {
 		ExecutionInformation info,
 		InvokerData invoker, 
 		string arg = null) {
-		
-		string uid = invoker.IsAnonymous ? null : invoker.ClientUid.Value;
-		return CommandQueueInternal(info, invoker, uid, arg);
+		return CommandQueueInternal(info, invoker.ClientUid, arg);
 	}
 
-	public JsonValue<CurrentQueueInfo> CommandQueueInternal(ExecutionInformation info, InvokerData invoker, string uid, string arg = null) {
+	private JsonValue<CurrentQueueInfo> CommandQueueInternal(ExecutionInformation info, Uid uid, string arg = null) {
 		bool restricted = arg != "full";
 		if (!restricted && !info.HasRights(RightOverrideQueueCommandCheck))
 			throw new CommandException("You have no permission to view the full queue.", CommandExceptionReason.CommandError);
 		var queueInfo = new CurrentQueueInfo();
 		lock (playManager) {
-			bool ShouldRestrict(QueueItem qi) => restricted && qi.MetaData.ResourceOwnerUid != invoker.ClientUid;
+			bool ShouldRestrict(QueueItem qi) => restricted && qi.MetaData.ResourceOwnerUid != uid;
 			queueInfo.Items = playManager.Queue.Items.Skip(playManager.Queue.Index + 1)
 				.Select(qi => ToQueueItemInfo(qi, ShouldRestrict(qi))).ToList();
 			if (playManager.IsPlaying)
