@@ -981,8 +981,10 @@ public class KDFCommands : IBotPlugin {
 			throw new CommandException("You have no permission to view the full queue.", CommandExceptionReason.CommandError);
 		var queueInfo = new CurrentQueueInfo();
 		lock (playManager) {
-			queueInfo.Items = playManager.Queue.Items.Skip(playManager.Queue.Index + 1).Select(qi => ToQueueItemInfo(qi, qi.MetaData.ResourceOwnerUid == invoker.ClientUid)).ToList();
-			if(playManager.IsPlaying)
+			bool ShouldRestrict(QueueItem qi) => restricted && qi.MetaData.ResourceOwnerUid != invoker.ClientUid;
+			queueInfo.Items = playManager.Queue.Items.Skip(playManager.Queue.Index + 1)
+				.Select(qi => ToQueueItemInfo(qi, ShouldRestrict(qi))).ToList();
+			if (playManager.IsPlaying)
 				queueInfo.Current = ToQueueItemInfo(playManager.Queue.Current, false);
 		}
 		return new JsonValue<CurrentQueueInfo>(queueInfo, QueueInfoToString);
