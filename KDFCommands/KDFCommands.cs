@@ -66,64 +66,35 @@ public class KDFCommands : IBotPlugin {
 		string uidStr = null
 	);
 
-	private Thread descThread;
-	private bool running;
-
-	private class DescriptionThreadData {
-		public string Title { get; }
-		public string PlaylistId { get; }
-		public string Username { get; }
-		public DescriptionThreadData(string title, string playlistId, string username) {
-			Title = title;
-			PlaylistId = playlistId;
-			Username = username;
-		}
-	}
-
-	private DescriptionThreadData descriptionThreadData;
-
-	private Player player;
 	private PlayManager playManager;
-	private PlaylistManager playlistManager;
-	private Ts3Client ts3Client;
 	private TsFullClient ts3FullClient;
 
 	private Voting Voting { get; }
 	private Autofill Autofill { get; }
+	private Description Description { get; }
 
 	public KDFCommands(
-			Player player,
+		    Player player,
 			PlayManager playManager,
 			PlaylistManager playlistManager,
 			Ts3Client ts3Client,
 			TsFullClient ts3FullClient,
 			CommandManager commandManager,
-			BotInjector injector,
 			ConfBot config) {
-		
-		this.player = player;
 		this.playManager = playManager;
-		this.playlistManager = playlistManager;
-		this.ts3Client = ts3Client;
 		this.ts3FullClient = ts3FullClient;
-		this.running = false;
 		playManager.OnPlaybackEnded();
 		commandManager.RegisterCollection(Bag);
 
 		Voting = new Voting(ts3Client, config);
 		Autofill = new Autofill(ts3Client, playManager, playlistManager, ts3FullClient);
+		Description = new Description(player, ts3Client, playManager);
 	}
 
 	public void Initialize() {
 		playManager.AfterResourceStarted += ResourceStarted;
 		playManager.PlaybackStopped += PlaybackStopped;
 		playManager.ResourceStopped += OnResourceStopped;
-
-		descThread = new Thread(DescriptionUpdater) {
-			IsBackground = true
-		};
-		running = true;
-		descThread.Start();
 	}
 
 	private void OnResourceStopped(object sender, SongEndEventArgs e) { 
@@ -131,7 +102,7 @@ public class KDFCommands : IBotPlugin {
 	}
 
 	private void ResourceStarted(object sender, PlayInfoEventArgs e) {
-		descriptionThreadData = new DescriptionThreadData(
+		Description.Data = new DescriptionData(
 			e.ResourceData.ResourceTitle, 
 			e.MetaData.ContainingPlaylistId, 
 			GetClientNameFromUid(ts3FullClient, e.PlayResource.Meta.ResourceOwnerUid));
@@ -139,26 +110,6 @@ public class KDFCommands : IBotPlugin {
 
 	private void PlaybackStopped(object sender, EventArgs eventArgs) {
 		Autofill.OnPlaybackStopped();
-	}
-
-	private void DescriptionUpdater() {
-		while (running) {
-			if (playManager.IsPlaying && descriptionThreadData != null) {
-				var data = descriptionThreadData;
-				int queueLength = playManager.Queue.Items.Count - playManager.Queue.Index - 1;
-				TimeSpan timeLeftTS = player.Length.Subtract(player.Position);
-				StringBuilder builder = new StringBuilder();
-				builder.Append("[");
-				if (data.Username != null)
-					builder.Append(data.Username);
-				builder.Append(" ").Append($"{timeLeftTS:mm\\:ss}");
-				builder.Append(" Q").Append(queueLength).Append("] ").Append(data.Title);
-				if (data.PlaylistId != null)
-					builder.Append(" <Playlist: ").Append(data.PlaylistId).Append(">");
-				ts3Client.ChangeDescription(builder.ToString()).UnwrapThrow();
-			}
-			Thread.Sleep(1000);
-		}
 	}
 
 	public static string GetClientNameFromUid(TsFullClient ts3FullClient, Uid? id) {
