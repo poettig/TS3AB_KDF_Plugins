@@ -51,8 +51,6 @@ public class KDFCommands : IBotPlugin {
 	public const string RightSkipOther = "skip.other";
 	public const string RightOverrideQueueCommandCheck = "queue.view.full";
 
-	private static readonly TimeSpan MinIdleTimeForVoteIgnore = TimeSpan.FromMinutes(10);
-
 	private delegate string PartHandler(
 		PlaylistManager playlistManager,
 		PlayManager playManager,
@@ -90,17 +88,7 @@ public class KDFCommands : IBotPlugin {
 	private Ts3Client ts3Client;
 	private TsFullClient ts3FullClient;
 
-	private class AutoFillData {
-		public Random Random { get; } = new Random();
-		public HashSet<string> Playlists { get; set; } = null;
-		public QueueItem Next { get; set; }
-	}
-
-	private AutoFillData autofillData;
-
-	private bool AutofillEnabled => autofillData != null;
-
-	private VoteData voteData;
+	private Voting Voting { get; }
 
 	public KDFCommands(
 			Player player,
@@ -121,12 +109,7 @@ public class KDFCommands : IBotPlugin {
 		playManager.OnPlaybackEnded();
 		commandManager.RegisterCollection(Bag);
 
-		if (injector.TryGet(out voteData)) {
-			return;
-		}
-
-		voteData = new VoteData(ts3Client, config);
-		injector.AddModule(voteData);
+		Voting = new Voting(ts3Client, config);
 	}
 
 	public void Initialize() {
@@ -142,7 +125,7 @@ public class KDFCommands : IBotPlugin {
 	}
 
 	private void OnResourceStopped(object sender, SongEndEventArgs e) { 
-		voteData.OnSongEnd(sender, e);
+		Voting.OnSongEnd();
 	}
 
 	private void ResourceStarted(object sender, PlayInfoEventArgs e) {
@@ -1304,223 +1287,11 @@ public class KDFCommands : IBotPlugin {
 		ts3Client.SendChannelMessage("[" + GetClientNameFromUid(ts3FullClient, uid) + "] " + AutofillStatus("now"));
 	}
 
-	public static class VotableCommands {
-		public abstract class AVotableCommand {
-			public static E<LocalStr> AreEmpty(string args) {
-				if (string.IsNullOrEmpty(args))
-					return R.Ok;
-				return new LocalStr("This command can only be voted without arguments");
-			}
-
-			public static E<LocalStr> AreNotEmpty(string args) {
-				if (!string.IsNullOrEmpty(args))
-					return R.Ok;
-				return new LocalStr("This command can't be voted without arguments");
-			}
-
-			public abstract (Func<string> action, bool removeOnResourceEnd) Create(ExecutionInformation info, string command, string args);
-		}
-
-		public static string ExecuteCommandWithArgs(ExecutionInformation info, string command, string args) {
-			StringBuilder builder = new StringBuilder();
-			builder.Append("!").Append(command);
-			if (args != null)
-				builder.Append(' ').Append(args);
-			return CommandManager.ExecuteCommand(info, builder.ToString());
-		}
-
-		public static readonly Dictionary<string, AVotableCommand> Commands = new Dictionary<string, AVotableCommand>(
-			new[] {
-				new KeyValuePair<string, AVotableCommand>("pause", EmptyArgsCommand.Instance),
-				new KeyValuePair<string, AVotableCommand>("previous", EmptyArgsCommand.ResetInstance),
-				new KeyValuePair<string, AVotableCommand>("stop", EmptyArgsCommand.Instance),
-				new KeyValuePair<string, AVotableCommand>("clear", EmptyArgsCommand.Instance),
-				new KeyValuePair<string, AVotableCommand>("front", FrontCommand.Instance),
-				new KeyValuePair<string, AVotableCommand>("skip", SkipCommand.Instance)
-			});
-
-		public class EmptyArgsCommand : AVotableCommand {
-			public bool ResetOnResourceEnd { get; }
-
-			public override (Func<string> action, bool removeOnResourceEnd) Create(ExecutionInformation info, string command, string args) {
-				AreEmpty(args).UnwrapThrow();
-				return (() => ExecuteCommandWithArgs(info, command, args), ResetOnResourceEnd);
-			}
-
-			private EmptyArgsCommand(bool reset) { ResetOnResourceEnd = reset; }
-			public static AVotableCommand ResetInstance { get; } = new EmptyArgsCommand(true);
-			public static AVotableCommand Instance { get; } = new EmptyArgsCommand(false);
-		}
-
-		public class SkipCommand : AVotableCommand {
-			public override (Func<string> action, bool removeOnResourceEnd) Create(ExecutionInformation info, string command, string args) {
-				if (!string.IsNullOrWhiteSpace(args) && !int.TryParse(args, out _))
-					throw new CommandException("Skip expects no parameters or a number", CommandExceptionReason.CommandError);
-				return (() => ExecuteCommandWithArgs(info, command, args), true);
-			}
-			private SkipCommand() {}
-			public static AVotableCommand Instance { get; } = new SkipCommand();
-		}
-		public class FrontCommand : AVotableCommand {
-			public override (Func<string> action, bool removeOnResourceEnd) Create(ExecutionInformation info, string command, string args) {
-				AreNotEmpty(args).UnwrapThrow();
-				return (() => ExecuteCommandWithArgs(info, command, args), false);
-			}
-			private FrontCommand() {}
-			public static AVotableCommand Instance { get; } = new FrontCommand();
-		}
-	}
-
-	public static string ExecuteTryCatch(ConfBot config, bool answer, Func<string> action, Action<string> errorHandler) {
-		try {
-			return action();
-		} catch (CommandException ex) {
-			NLog.LogLevel commandErrorLevel = answer ? NLog.LogLevel.Debug : NLog.LogLevel.Warn;
-			Log.Log(commandErrorLevel, ex, "Command Error ({0})", ex.Message);
-			if (answer) {
-				errorHandler(TextMod.Format(config.Commands.Color,
-					"Error: {0}".Mod().Color(Color.Red).Bold(),
-					ex.Message));
-			}
-		} catch (Exception ex) {
-			Log.Error(ex, "Unexpected command error: {0}", ex.UnrollException());
-			if (answer) {
-				errorHandler(TextMod.Format(config.Commands.Color,
-						"An unexpected error occured: {0}".Mod().Color(Color.Red).Bold(), ex.Message));
-			}
-		}
-
-		return null;
-	}
-
-	private class CurrentVoteData {
-		public string Command { get; }
-		public Func<string> Executor { get; }
-		public int Needed { get; }
-		public bool RemoveOnResourceEnd { get; }
-		public HashSet<Uid> Voters { get; } = new HashSet<Uid>();
-		public CurrentVoteData(string command, int clientCount, Func<string> executor, bool removeOnResourceEnd) {
-			Command = command;
-			Needed = Math.Max(clientCount / 2, 1);
-			Executor = executor;
-			RemoveOnResourceEnd = removeOnResourceEnd;
-		}
-	}
-
-	private class VoteData {
-		private readonly Dictionary<string, CurrentVoteData> currentVotes = new Dictionary<string, CurrentVoteData>();
-		private readonly List<CurrentVoteData> removeOnResourceEnded = new List<CurrentVoteData>();
-
-		public IReadOnlyDictionary<string, CurrentVoteData> CurrentVotes => currentVotes;
-
-		private readonly Ts3Client client;
-		private readonly ConfBot config;
-
-		public VoteData(Ts3Client client, ConfBot config) {
-			this.client = client;
-			this.config = config;
-		}
-
-		public void OnSongEnd(object sender, EventArgs e) {
-			foreach (var vote in removeOnResourceEnded) {
-				currentVotes.Remove(vote.Command);
-				client.SendChannelMessage($"Stopped vote for \"{vote.Command}\" due to end of resource.");
-			}
-			removeOnResourceEnded.Clear();
-		}
-
-		public void Add(CurrentVoteData vote) {
-			currentVotes.Add(vote.Command, vote);
-			if(vote.RemoveOnResourceEnd)
-				removeOnResourceEnded.Add(vote);
-		}
-
-		public void Remove(CurrentVoteData vote) {
-			currentVotes.Remove(vote.Command);
-			if(vote.RemoveOnResourceEnd)
-				removeOnResourceEnded.Remove(vote);
-		}
-		public bool CheckAndFire(CurrentVoteData vote) {
-			if (vote.Needed > vote.Voters.Count) {
-				return false;
-			}
-
-			client.SendChannelMessage($"Enough votes, executing \"{vote.Command}\"...");
-				
-			Remove(vote);
-			var res = ExecuteTryCatch(config, true, vote.Executor, err => client.SendChannelMessage(err).UnwrapToLog(Log));
-			if (!string.IsNullOrEmpty(res))
-				client.SendChannelMessage(res).UnwrapToLog(Log);
-
-			return true;
-
-		}
-	}
-
-	private static E<int> CountClientsInChannel(TsFullClient client, ChannelId channel, Func<Client, bool> predicate) {
-		return client.Book.Clients.Values.Count(c => c.Channel == channel && predicate(c));
-	}
-
 	[Command("vote")]
-	public static void CommandStartVote(TsFullClient ts3FullClient, Ts3Client ts3Client, BotInjector injector, ExecutionInformation info, ClientCall invoker, ConfBot config, string command, string? args = null) {
-		
-		var userChannel = invoker.ChannelId;
-		if(!userChannel.HasValue)
-			throw new CommandException("Could not get user channel", CommandExceptionReason.InternalError);
-		var botChannel = ts3FullClient.Book.Clients[ts3FullClient.ClientId].Channel;
-
-		if(botChannel != userChannel.Value)
-			throw new CommandException("You have to be in the same channel as the bot to use votes", CommandExceptionReason.CommandError);
-
-		command = command.ToLower();
-		if (string.IsNullOrWhiteSpace(command))
-			throw new CommandException("No command to vote for given", CommandExceptionReason.CommandError);
-		
-		if(!VotableCommands.Commands.TryGetValue(command, out var votableCommand)) 
-			throw new CommandException($"The given command \"{command}\" can't be voted for", CommandExceptionReason.CommandError);
-
-		if (!injector.TryGet<VoteData>(out var voteData))
-			throw new CommandException("VoteData could not be found", CommandExceptionReason.InternalError);
-
-		if (voteData.CurrentVotes.TryGetValue(command, out var currentVote)) {
-			if(!string.IsNullOrWhiteSpace(args))
-				throw new CommandException("There is already a vote going on for this command. You can't start another vote for the same command with other parameters right now.", CommandExceptionReason.CommandError);
-
-			if (currentVote.Voters.Remove(invoker.ClientUid)) {
-				int count = currentVote.Voters.Count;
-				if (count == 0) {
-					voteData.Remove(currentVote);
-					ts3Client.SendChannelMessage($"Stopped vote for \"{command}\".");
-				} else {
-					ts3Client.SendChannelMessage($"Removed your vote for \"{command}\" ({currentVote.Voters.Count} votes of {currentVote.Needed})");
-				}
-			} else {
-				currentVote.Voters.Add(invoker.ClientUid);
-				voteData.CheckAndFire(currentVote);
-				ts3Client.SendChannelMessage($"Added your vote for \"{command}\" ({currentVote.Voters.Count} votes of {currentVote.Needed})");
-			}
-		} else {
-			var ci = new CallerInfo(false) {SkipRightsChecks = true, CommandComplexityMax = config.Commands.CommandComplexity};
-
-			bool CheckClient(Client client) {
-				if (ts3FullClient.ClientId == client.Id) // exclude bot
-					return false;
-				if (client.OutputMuted) // exclude muted
-					return false;
-				
-				var data = ts3Client.GetClientInfoById(client.Id);
-				return !data.Ok || data.Value.ClientIdleTime < MinIdleTimeForVoteIgnore; // include if data not ok or not long enough idle
-			}
-
-			int clientCount = CountClientsInChannel(ts3FullClient, botChannel, CheckClient);
-			info.AddModule(ci);
-			var (executor, removeOnResourceEnd) = votableCommand.Create(info, command, args);
-			currentVote = new CurrentVoteData(command, clientCount, executor, removeOnResourceEnd);
-			voteData.Add(currentVote);
-			currentVote.Voters.Add(invoker.ClientUid);
-			ts3Client.SendChannelMessage($"Started vote for \"{command}\" ({currentVote.Voters.Count} votes of {currentVote.Needed}).");
-			voteData.CheckAndFire(currentVote);
-		}
+	public void CommandStartVote(
+		TsFullClient ts3FullClient, Ts3Client ts3Client, BotInjector injector, ExecutionInformation info,
+		ClientCall invoker, ConfBot config, string command, string? args = null) {
+		Voting.CommandVote(ts3FullClient, ts3Client, injector, info, invoker, command, args);
 	}
 
 	public void Dispose() {
