@@ -89,6 +89,7 @@ public class KDFCommands : IBotPlugin {
 	private TsFullClient ts3FullClient;
 
 	private Voting Voting { get; }
+	private Autofill Autofill { get; }
 
 	public KDFCommands(
 			Player player,
@@ -110,6 +111,7 @@ public class KDFCommands : IBotPlugin {
 		commandManager.RegisterCollection(Bag);
 
 		Voting = new Voting(ts3Client, config);
+		Autofill = new Autofill(ts3Client, playManager, playlistManager, ts3FullClient);
 	}
 
 	public void Initialize() {
@@ -135,134 +137,10 @@ public class KDFCommands : IBotPlugin {
 			GetClientNameFromUid(ts3FullClient, e.PlayResource.Meta.ResourceOwnerUid));
 	}
 
-	private bool playbackStoppedReentrantGuard = false;
-
-	private void PlaybackStopped(object sender, EventArgs e) {
-		if (playbackStoppedReentrantGuard)
-			return;
-		playbackStoppedReentrantGuard = true;
-
-		// Enqueue fires playback stopped event if the song failed to play
-		UpdateAutofillOnPlaybackStopped();
-
-		playbackStoppedReentrantGuard = false;
+	private void PlaybackStopped(object sender, EventArgs eventArgs) {
+		Autofill.OnPlaybackStopped();
 	}
 
-	private void UpdateAutofillOnPlaybackStopped() {
-		if (playManager.Queue.Items.Count != playManager.Queue.Index || !AutofillEnabled) {
-			return;
-		}
-
-		for (var i = 0; i < 10; i++) {
-			if (ts3Client.IsDefinitelyAlone()) {
-				DisableAutofill();
-				return;
-			}
-
-			var result = PlayRandom();
-			if (result.Ok) {
-				return;
-			}
-		}
-
-		ts3Client.SendChannelMessage("Could not play a new autofill song after 10 tries. Disabling autofill.");
-		DisableAutofill();
-	}
-
-	private static R<(PlaylistInfo list, int offset)> FindSong(int index, IEnumerable<PlaylistInfo> playlists) {
-		foreach(var list in playlists) {
-			if (index < list.SongCount)
-				return (list, index);
-			index -= list.SongCount;
-		}
-
-		return R.Err;
-	}
-
-	private QueueItem DrawRandom() {
-		// Play random song from a random playlist currently in the selected set
-
-		// Get total number of songs from all selected playlists
-		var numSongs = 0;
-		var playlistsUnfiltered = playlistManager.GetAvailablePlaylists().UnwrapThrow();
-		List<PlaylistInfo> playlists = new List<PlaylistInfo>();
- 		foreach (var playlist in playlistsUnfiltered) {
-			if (autofillData.Playlists != null && !autofillData.Playlists.Contains(playlist.Id)) {
-				continue;
-			}
-
-	        playlists.Add(playlist);
-			numSongs += playlist.SongCount;
-		}
-		Log.Debug("Found {0} songs across {1} playlists.", numSongs, playlists.Count);
-
-		var sIdx = 0;
-		string plId = null;
-		AudioResource resource = null;
-		for (var i = 0; i < 5; i++) {
-			// Draw random song number
-			var songIndex = autofillData.Random.Next(0, numSongs);
-
-			// Find the randomized song
-			var infoOpt = FindSong(songIndex, playlists);
-			if (!infoOpt.Ok)
-				throw new CommandException("Autofill: Could not find the song at index " + songIndex + ".", CommandExceptionReason.InternalError);
-
-			var (list, index) = infoOpt.Value;
-			var playlist = playlistManager.LoadPlaylist(list.Id).UnwrapThrow();
-
-			if(playlist.Items.Count != list.SongCount)
-				Log.Warn("Playlist '{0}' is possibly corrupted!", list.Id);
-
-			sIdx = index;
-			plId = list.Id;
-			resource = playlist.Items[index].AudioResource;
-			Log.Info("Found song index {0}: Song '{1}' in playlist '{2}' at index {3}.", songIndex, resource.ResourceTitle, list.Id, index);
-
-			// Check if the song was already played in the last 250 songs, if not take this one.
-			// If items.count < 250, the subtraction is negative, meaning that j == 0 will be reached first
-			var foundDuplicate = false;
-			var items = playManager.Queue.Items;
-			if (items.Count > 0) {
-				for (var j = items.Count - 1; j != 0 && j >= items.Count - 250; j--) {
-					if (!items[j].AudioResource.Equals(resource)) {
-						continue;
-					}
-
-					Log.Info("The song {0} was already played {1} songs ago. Searching another one...", items[j].AudioResource.ResourceTitle,items.Count - j - 1);
-					foundDuplicate = true;
-					break;
-				}
-			}
-
-			if (!foundDuplicate) {
-				break;
-			}
-		}
-
-		if (resource == null) { // Should not happen
-			throw new CommandException("Autofill: Missing resource for song at index " + sIdx + " in playlist " + plId + ".", CommandExceptionReason.InternalError);
-		}
-
-		return new QueueItem(resource, new MetaData(ts3FullClient.Identity.ClientUid, plId));
-	}
-
-	private void DrawNextSong() {
-		autofillData.Next = DrawRandom();
-		playManager.PrepareNextSong(autofillData.Next);
-	}
-
-	private E<LocalStr> PlayRandom() {
-		if(autofillData.Next == null)
-			throw new InvalidOperationException();
-
-		var item = autofillData.Next;
-		Log.Info("Autofilling the song '{0}' from playlist '{1}'.", item.AudioResource.ResourceTitle, item.MetaData.ContainingPlaylistId);
-		var res = playManager.Enqueue(item);
-		DrawNextSong();
-		return res;
-	}
-	
 	private void DescriptionUpdater() {
 		while (running) {
 			if (playManager.IsPlaying && descriptionThreadData != null) {
@@ -283,7 +161,7 @@ public class KDFCommands : IBotPlugin {
 		}
 	}
 
-	private static string GetClientNameFromUid(TsFullClient ts3FullClient, Uid? id) {
+	public static string GetClientNameFromUid(TsFullClient ts3FullClient, Uid? id) {
 		if (!id.HasValue) {
 			return null;
 		}
@@ -1162,131 +1040,32 @@ public class KDFCommands : IBotPlugin {
 		return result.Value.Count(item => item.Uid.ToString() == uid) != 0;
 	}
 
-	private string AutofillStatus(string word) {
-		string result = "Autofill is " + word + " ";
-			
-		if (AutofillEnabled) {
-			result += "enabled";
-
-			if(autofillData.Playlists != null) {
-				result += " using the playlists " + string.Join(", ", autofillData.Playlists) + ".";
-			} else {
-				result += " using all playlists.";
-			}
-		} else {
-			result += "disabled";
-			result += ".";
-		}
-
-		return result;
-	}
-
-	private void DisableAutofill() {
-		autofillData = null;
-	}
-
 	[Command("autofillstatus")]
 	public string CommandAutofillStatus() {
-		return AutofillStatus("currently");
+		return Autofill.Status("currently");
 	}
 
 	[Command("autofilloff")]
 	private void CommandAutofillOff(InvokerData invoker) {
-		CommandAutofillOffInternal(invoker.ClientUid);
+		Autofill.Disable(invoker.ClientUid);
 	}
 
 	[Command("autofilloffbyuid")]
 	private void CommandAutofillOffByUid(string uid) {
-		CommandAutofillOffInternal(Uid.To(uid));
-	}
-
-	private void CommandAutofillOffInternal(Uid uid) {
-		// Explicitly requested to turn it off
-		DisableAutofill();
-		ts3Client.SendChannelMessage("[" + GetClientNameFromUid(ts3FullClient, uid) + "] " + AutofillStatus("now"));
+		Autofill.Disable(Uid.To(uid));
 	}
 
 	[Command("autofill")]
 	public void CommandAutofill(InvokerData invoker, string[] playlistIds = null) {
-		CommandAutofillInternal(invoker.ClientUid, playlistIds);
+		Autofill.CommandAutofill(invoker.ClientUid, playlistIds);
 	}
 
 	[Command("autofillbyuid")]
 	public void CommandAutofillByUid(InvokerData invoker, string uidStr, string[] playlistIds = null) {
 		checkOnlineThrow(ts3FullClient, uidStr);
-		CommandAutofillInternal(Uid.To(uidStr), playlistIds);
+		Autofill.CommandAutofill(Uid.To(uidStr), playlistIds);
 	}
 	
-	private void CommandAutofillInternal(Uid uid, string[] playlistIds = null) {
-		// Check if all playlists exist, otherwise throw exception
-		if (playlistIds != null) {
-			for (int i = 0; i < playlistIds.Length; ++i) {
-				if (playlistManager.TryGetPlaylistId(playlistIds[i], out var realId)) {
-					playlistIds[i] = realId; // Apply possible correction
-				} else {
-					throw new CommandException("The playlist '" + playlistIds[i] + "' does not exist.",
-						CommandExceptionReason.CommandError);
-				}
-			}
-		}
-
-		if (AutofillEnabled) {
-			if (autofillData.Playlists == null) {
-				// Currently enabled but without a selected set of playlists
-			
-				if (playlistIds != null && playlistIds.Length != 0) {
-					// If a selected set of playlists is given, change to "set of playlists"
-					autofillData.Playlists = new HashSet<string>(playlistIds);
-					DrawNextSong();
-				} else {
-					// Else, disable autofill
-					DisableAutofill();
-				}
-			} else {
-				// Currently enabled with a selected set of playlists
-			
-				if (playlistIds != null && playlistIds.Length != 0) {
-					// If a selected set of playlists is given, update it
-					autofillData.Playlists = new HashSet<string>(playlistIds);
-				} else {
-					// Else, switch to all
-					autofillData.Playlists = null;
-				}
-				DrawNextSong();
-			}
-		} else {
-			// Currently disabled, enable now (with set of playlists if given)
-			autofillData = new AutoFillData();
-			if (playlistIds != null && playlistIds.Length != 0) {
-				autofillData.Playlists = new HashSet<string>(playlistIds);
-			} else {
-				autofillData.Playlists = null;
-			}
-			autofillData.Next = DrawRandom();
-		}
-
-		// Only play a song if there is currently none playing
-		if (AutofillEnabled && !playManager.IsPlaying) {
-			bool found = false;
-			for (var i = 0; i < 10; i++) {
-				var result = PlayRandom();
-				if (result.Ok) {
-					found = true;
-					break;
-				}
-			}
-
-			if (!found) {
-				// Could not successfully play a song after 10 tries
-				ts3Client.SendChannelMessage("Could not play a new autofill song after 10 tries. Disabling autofill.");
-				DisableAutofill();
-				return;
-			}
-		}
-
-		ts3Client.SendChannelMessage("[" + GetClientNameFromUid(ts3FullClient, uid) + "] " + AutofillStatus("now"));
-	}
-
 	[Command("vote")]
 	public void CommandStartVote(
 		TsFullClient ts3FullClient, Ts3Client ts3Client, BotInjector injector, ExecutionInformation info,
