@@ -1,6 +1,7 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text;
+using Newtonsoft.Json;
 using TS3AudioBot;
 using TS3AudioBot.CommandSystem;
 using TS3AudioBot.CommandSystem.Text;
@@ -184,7 +185,21 @@ namespace KDFCommands {
 			return true;
 		}
 
-		public void CommandVote(
+		public class Result {
+			// true = added user vote, false = removed user vote
+			[JsonProperty(PropertyName = "VoteAdded")]
+			public bool VoteAdded { get; set; }
+
+			// this action resulted in a completed vote
+			[JsonProperty(PropertyName = "VoteComplete")]
+			public bool VoteComplete { get; set; }
+
+			// this action resulted in a change in the vote set (created new or removed last vote)
+			[JsonProperty(PropertyName = "VotesChanged")]
+			public bool VotesChanged { get; set; }
+		}
+		
+		public Result CommandVote(
 			ExecutionInformation info,
 			Uid invoker, ChannelId botChannel, string command, string? args = null) {
 
@@ -196,6 +211,9 @@ namespace KDFCommands {
 				throw new CommandException($"The given command \"{command}\" can't be voted for",
 					CommandExceptionReason.CommandError);
 
+			bool voteAdded;
+			bool votesChanged;
+			bool voteCompleted;
 			if (CurrentVotes.TryGetValue(command, out var currentVote)) {
 				if (!string.IsNullOrWhiteSpace(args))
 					throw new CommandException(
@@ -204,18 +222,24 @@ namespace KDFCommands {
 
 				if (currentVote.Voters.Remove(invoker)) {
 					int count = currentVote.Voters.Count;
+					voteAdded = false;
 					if (count == 0) {
 						Remove(currentVote);
-						_client.SendChannelMessage($"Stopped vote for \"{command}\".");
+						votesChanged = true;
+						
+						_client.SendChannelMessage($"Removed vote of {ClientUtility.GetClientNameFromUid(_ts3FullClient, invoker)} and stopped vote for \"{command}\".");
 					} else {
-						_client.SendChannelMessage(
-							$"Removed your vote for \"{command}\" ({currentVote.Voters.Count} votes of {currentVote.Needed})");
+						votesChanged = false;
+						_client.SendChannelMessage($"Removed vote of {ClientUtility.GetClientNameFromUid(_ts3FullClient, invoker)} for \"{command}\" ({currentVote.Voters.Count} votes of {currentVote.Needed})");
 					}
+
+					voteCompleted = false;
 				} else {
 					currentVote.Voters.Add(invoker);
-					_client.SendChannelMessage(
-						$"Added your vote for \"{command}\" ({currentVote.Voters.Count} votes of {currentVote.Needed})");
-					CheckAndFire(currentVote);
+					voteAdded = true;
+					_client.SendChannelMessage($"Added vote of {ClientUtility.GetClientNameFromUid(_ts3FullClient, invoker)} for \"{command}\" ({currentVote.Voters.Count} votes of {currentVote.Needed})");
+					votesChanged = false;
+					voteCompleted = CheckAndFire(currentVote);
 				}
 			} else {
 				var ci = new CallerInfo(false)
@@ -237,11 +261,18 @@ namespace KDFCommands {
 				var (executor, removeOnResourceEnd) = votableCommand.Create(info, command, args);
 				currentVote = new CurrentVoteData(command, clientCount, executor, removeOnResourceEnd);
 				Add(currentVote);
+				voteAdded = true;
 				currentVote.Voters.Add(invoker);
-				_client.SendChannelMessage(
-					$"Started vote for \"{command}\" ({currentVote.Voters.Count} votes of {currentVote.Needed}).");
-				CheckAndFire(currentVote);
+				votesChanged = true;
+				_client.SendChannelMessage($"{ClientUtility.GetClientNameFromUid(_ts3FullClient, invoker)} started vote for \"{command}\" ({currentVote.Voters.Count} votes of {currentVote.Needed})");
+				voteCompleted = CheckAndFire(currentVote);
 			}
+
+			return new Result {
+				VoteAdded = voteAdded,
+				VoteComplete = voteCompleted,
+				VotesChanged = votesChanged
+			};
 		}
 	}
 }
