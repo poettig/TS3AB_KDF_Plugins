@@ -749,7 +749,7 @@ namespace KDFCommands {
 
 			// Check if user exists, throws exception if not.
 			var uid = Uid.To(uidStr);
-			ClientUtility.GetClientNameFromUid(ts3FullClient, uid);
+			ClientUtility.CheckOnlineThrow(ts3FullClient, uid);
 			return CommandQueueInternal(info, uid, uidStr);
 		}
 
@@ -998,7 +998,7 @@ namespace KDFCommands {
 			var uid = Uid.To(clientUid);
 			var botChannel = ts3FullClient.Book.Clients[ts3FullClient.ClientId].Channel;
 
-			var client = ClientUtility.ClientByUid(ts3FullClient, uid);
+			var client = ClientUtility.ClientByUidOnline(ts3FullClient, uid);
 			if (client == null)
 				throw new CommandException("Could not get user", CommandExceptionReason.InternalError);
 

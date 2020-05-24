@@ -13,7 +13,7 @@ namespace KDFCommands {
 			return client.Book.Clients.Values.Count(c => c.Channel == channel && predicate(c));
 		}
 
-		public static Client ClientByUid(TsFullClient ts3FullClient, Uid uid) {
+		public static Client ClientByUidOnline(TsFullClient ts3FullClient, Uid uid) {
 			foreach (var (_, value) in ts3FullClient.Book.Clients) {
 				if (value.Uid == uid)
 					return value;
@@ -23,12 +23,7 @@ namespace KDFCommands {
 		}
 
 		public static bool ClientIsOnline(TsFullClient ts3FullClient, Uid uid) {
-			var result = ts3FullClient.ClientList(ClientListOptions.uid);
-			if (!result) {
-				return false;
-			}
-
-			return result.Value.Count(item => item.Uid == uid) != 0;
+			return ClientByUidOnline(ts3FullClient, uid) != null;
 		}
 
 		public static void SendMessage(Ts3Client client, ClientCall cc, string message) {
