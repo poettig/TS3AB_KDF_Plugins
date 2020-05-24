@@ -117,10 +117,12 @@ public class Voting {
 
 	private readonly Ts3Client _client;
 	private readonly ConfBot _config;
+	private TsFullClient _ts3FullClient;
 
-	public Voting(Ts3Client client, ConfBot config) {
+	public Voting(Ts3Client client, TsFullClient ts3FullClient, ConfBot config) {
 		_client = client;
 		_config = config;
+		_ts3FullClient = ts3FullClient;
 	}
 
 	public static string ExecuteTryCatch(
@@ -155,19 +157,19 @@ public class Voting {
 		_removeOnResourceEnded.Clear();
 	}
 
-	public void Add(CurrentVoteData vote) {
+	private void Add(CurrentVoteData vote) {
 		_currentVotes.Add(vote.Command, vote);
 		if (vote.RemoveOnResourceEnd)
 			_removeOnResourceEnded.Add(vote);
 	}
 
-	public void Remove(CurrentVoteData vote) {
+	private void Remove(CurrentVoteData vote) {
 		_currentVotes.Remove(vote.Command);
 		if (vote.RemoveOnResourceEnd)
 			_removeOnResourceEnded.Remove(vote);
 	}
 
-	public bool CheckAndFire(CurrentVoteData vote) {
+	private bool CheckAndFire(CurrentVoteData vote) {
 		if (vote.Needed > vote.Voters.Count) {
 			return false;
 		}
@@ -188,17 +190,8 @@ public class Voting {
 		return client.Book.Clients.Values.Count(c => c.Channel == channel && predicate(c));
 	}
 
-	public void CommandVote(
-		TsFullClient ts3FullClient, Ts3Client ts3Client, BotInjector injector, ExecutionInformation info,
-		ClientCall invoker, string command, string? args = null) {
-		var userChannel = invoker.ChannelId;
-		if (!userChannel.HasValue)
-			throw new CommandException("Could not get user channel", CommandExceptionReason.InternalError);
-		var botChannel = ts3FullClient.Book.Clients[ts3FullClient.ClientId].Channel;
-
-		if (botChannel != userChannel.Value)
-			throw new CommandException("You have to be in the same channel as the bot to use votes",
-				CommandExceptionReason.CommandError);
+	public void CommandVote(ExecutionInformation info,
+		Uid invoker, ChannelId botChannel, string command, string? args = null) {
 
 		command = command.ToLower();
 		if (string.IsNullOrWhiteSpace(command))
@@ -214,43 +207,43 @@ public class Voting {
 					"There is already a vote going on for this command. You can't start another vote for the same command with other parameters right now.",
 					CommandExceptionReason.CommandError);
 
-			if (currentVote.Voters.Remove(invoker.ClientUid)) {
+			if (currentVote.Voters.Remove(invoker)) {
 				int count = currentVote.Voters.Count;
 				if (count == 0) {
 					Remove(currentVote);
-					ts3Client.SendChannelMessage($"Stopped vote for \"{command}\".");
+					_client.SendChannelMessage($"Stopped vote for \"{command}\".");
 				} else {
-					ts3Client.SendChannelMessage(
+					_client.SendChannelMessage(
 						$"Removed your vote for \"{command}\" ({currentVote.Voters.Count} votes of {currentVote.Needed})");
 				}
 			} else {
-				currentVote.Voters.Add(invoker.ClientUid);
-				CheckAndFire(currentVote);
-				ts3Client.SendChannelMessage(
+				currentVote.Voters.Add(invoker);
+				_client.SendChannelMessage(
 					$"Added your vote for \"{command}\" ({currentVote.Voters.Count} votes of {currentVote.Needed})");
+				CheckAndFire(currentVote);
 			}
 		} else {
 			var ci = new CallerInfo(false)
 				{SkipRightsChecks = true, CommandComplexityMax = _config.Commands.CommandComplexity};
 
 			bool CheckClient(Client client) {
-				if (ts3FullClient.ClientId == client.Id) // exclude bot
+				if (_ts3FullClient.ClientId == client.Id) // exclude bot
 					return false;
 				if (client.OutputMuted) // exclude muted
 					return false;
 
-				var data = ts3Client.GetClientInfoById(client.Id);
+				var data = _client.GetClientInfoById(client.Id);
 				return !data.Ok || data.Value.ClientIdleTime <
 				       MinIdleTimeForVoteIgnore; // include if data not ok or not long enough idle
 			}
 
-			int clientCount = CountClientsInChannel(ts3FullClient, botChannel, CheckClient);
+			int clientCount = CountClientsInChannel(_ts3FullClient, botChannel, CheckClient);
 			info.AddModule(ci);
 			var (executor, removeOnResourceEnd) = votableCommand.Create(info, command, args);
 			currentVote = new CurrentVoteData(command, clientCount, executor, removeOnResourceEnd);
 			Add(currentVote);
-			currentVote.Voters.Add(invoker.ClientUid);
-			ts3Client.SendChannelMessage(
+			currentVote.Voters.Add(invoker);
+			_client.SendChannelMessage(
 				$"Started vote for \"{command}\" ({currentVote.Voters.Count} votes of {currentVote.Needed}).");
 			CheckAndFire(currentVote);
 		}

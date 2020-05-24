@@ -86,7 +86,7 @@ public class KDFCommands : IBotPlugin {
 		playManager.OnPlaybackEnded();
 		commandManager.RegisterCollection(Bag);
 
-		Voting = new Voting(ts3Client, config);
+		Voting = new Voting(ts3Client, ts3FullClient, config);
 		Autofill = new Autofill(ts3Client, playManager, playlistManager, ts3FullClient);
 		Description = new Description(player, ts3Client, playManager);
 	}
@@ -1021,14 +1021,21 @@ public class KDFCommands : IBotPlugin {
 	public void CommandStartVote(
 		TsFullClient ts3FullClient, Ts3Client ts3Client, BotInjector injector, ExecutionInformation info,
 		ClientCall invoker, ConfBot config, string command, string? args = null) {
-		Voting.CommandVote(ts3FullClient, ts3Client, injector, info, invoker, command, args);
+		var userChannel = invoker.ChannelId;
+		if (!userChannel.HasValue)
+			throw new CommandException("Could not get user channel", CommandExceptionReason.InternalError);
+		var botChannel = ts3FullClient.Book.Clients[ts3FullClient.ClientId].Channel;
+
+		if (botChannel != userChannel.Value)
+			throw new CommandException("You have to be in the same channel as the bot to use votes",
+				CommandExceptionReason.CommandError);
+		Voting.CommandVote(info, invoker.ClientUid, botChannel, command, args);
 	}
 
 	public void Dispose() {
 		playManager.AfterResourceStarted -= ResourceStarted;
 		playManager.PlaybackStopped -= PlaybackStopped;
 
-		running = false;
-		descThread.Join();
+		Description.Dispose();
 	}
 }
