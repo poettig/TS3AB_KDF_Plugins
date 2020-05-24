@@ -1002,7 +1002,7 @@ namespace KDFCommands {
 		}
 
 		[Command("votewithuid")]
-		public void CommandStartVoteWithUid(
+		public JsonValue<Voting.Result> CommandStartVoteWithUid(
 			TsFullClient ts3FullClient, ExecutionInformation info,
 			string clientUid, string command, string? args = null) {
 			var uid = Uid.To(clientUid);
@@ -1016,7 +1016,8 @@ namespace KDFCommands {
 			if (botChannel != userChannel)
 				throw new CommandException("You have to be in the same channel as the bot to use votes.",
 					CommandExceptionReason.CommandError);
-			Voting.CommandVote(info, uid, botChannel, command, args);
+			var res = Voting.CommandVote(info, uid, botChannel, command, args);
+			return new JsonValue<Voting.Result>(res, r => null);
 		}
 
 		[Command("vote")]

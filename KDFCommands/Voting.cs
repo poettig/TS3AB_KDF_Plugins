@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using Newtonsoft.Json;
 using TS3AudioBot;
@@ -197,6 +198,14 @@ namespace KDFCommands {
 			// this action resulted in a change in the vote set (created new or removed last vote)
 			[JsonProperty(PropertyName = "VotesChanged")]
 			public bool VotesChanged { get; set; }
+			
+			// The current vote standing
+			[JsonProperty(PropertyName = "VoteCount")]
+			public int VoteCount { get; set; }
+			
+			// The number of votes needed for success
+			[JsonProperty(PropertyName = "VotesNeeded")]
+			public int VotesNeeded { get; set; }
 		}
 		
 		public Result CommandVote(
@@ -271,7 +280,9 @@ namespace KDFCommands {
 			return new Result {
 				VoteAdded = voteAdded,
 				VoteComplete = voteCompleted,
-				VotesChanged = votesChanged
+				VotesChanged = votesChanged,
+				VoteCount = currentVote.Voters.Count,
+				VotesNeeded = currentVote.Needed
 			};
 		}
 	}
