@@ -1016,11 +1016,38 @@ public class KDFCommands : IBotPlugin {
 		checkOnlineThrow(ts3FullClient, uidStr);
 		Autofill.CommandAutofill(Uid.To(uidStr), playlistIds);
 	}
+
+	public static Client ClientByUid(TsFullClient ts3FullClient, Uid uid) {
+		foreach (var (_, value) in ts3FullClient.Book.Clients) {
+			if (value.Uid == uid)
+				return value;
+		}
+
+		return null;
+	}
+
+	[Command("votewithuid")]
+	public void CommandStartVoteWithUid(
+		TsFullClient ts3FullClient, ExecutionInformation info,
+		string clientUid, string command, string? args = null) {
+		var uid = Uid.To(clientUid);
+		var botChannel = ts3FullClient.Book.Clients[ts3FullClient.ClientId].Channel;
+
+		var client = ClientByUid(ts3FullClient, uid);
+		if(client == null)
+			throw new CommandException("Could not get user", CommandExceptionReason.InternalError);
+
+		var userChannel = client.Channel;
+		if (botChannel != userChannel)
+			throw new CommandException("You have to be in the same channel as the bot to use votes",
+				CommandExceptionReason.CommandError);
+		Voting.CommandVote(info, uid, botChannel, command, args);
+	}
 	
 	[Command("vote")]
 	public void CommandStartVote(
-		TsFullClient ts3FullClient, Ts3Client ts3Client, BotInjector injector, ExecutionInformation info,
-		ClientCall invoker, ConfBot config, string command, string? args = null) {
+		TsFullClient ts3FullClient, ExecutionInformation info,
+		ClientCall invoker, string command, string? args = null) {
 		var userChannel = invoker.ChannelId;
 		if (!userChannel.HasValue)
 			throw new CommandException("Could not get user channel", CommandExceptionReason.InternalError);
