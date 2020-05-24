@@ -191,6 +191,9 @@ namespace KDFCommands {
 					CommandExceptionReason.InternalError);
 			}
 
+			using (System.IO.StreamWriter statfile = new System.IO.StreamWriter("stats.txt", true)) {
+				statfile.WriteLine(resource.ResourceTitle + ":" + resource.ResourceId);
+			}
 			return new QueueItem(resource, new MetaData(Ts3FullClient.Identity.ClientUid, plId));
 		}
 
