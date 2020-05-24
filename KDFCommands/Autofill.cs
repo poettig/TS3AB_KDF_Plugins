@@ -19,6 +19,7 @@ namespace KDFCommands {
 			public Random Random { get; } = new Random();
 			public HashSet<string> Playlists { get; set; } = null;
 			public QueueItem Next { get; set; }
+			public Uid IssuerUid { get; set; }
 		}
 
 		private AutoFillData AutofillData { get; set; }
@@ -33,7 +34,11 @@ namespace KDFCommands {
 		public TsFullClient Ts3FullClient { get; }
 
 		public Autofill(
-			Ts3Client ts3Client, PlayManager playManager, PlaylistManager playlistManager, TsFullClient ts3FullClient) {
+			Ts3Client ts3Client,
+			PlayManager playManager,
+			PlaylistManager playlistManager,
+			TsFullClient ts3FullClient) {
+			
 			Ts3Client = ts3Client;
 			PlayManager = playManager;
 			PlaylistManager = playlistManager;
@@ -51,6 +56,8 @@ namespace KDFCommands {
 				} else {
 					result += " using all playlists.";
 				}
+				
+				result += " Last change by " + ClientUtility.GetClientNameFromUid(Ts3FullClient, AutofillData.IssuerUid) + ".";
 			} else {
 				result += "disabled";
 				result += ".";
@@ -224,6 +231,7 @@ namespace KDFCommands {
 					if (playlistIds != null && playlistIds.Length != 0) {
 						// If a selected set of playlists is given, change to "set of playlists"
 						AutofillData.Playlists = new HashSet<string>(playlistIds);
+						AutofillData.IssuerUid = uid;
 						DrawNextSong();
 					} else {
 						// Else, disable autofill
@@ -235,16 +243,18 @@ namespace KDFCommands {
 					if (playlistIds != null && playlistIds.Length != 0) {
 						// If a selected set of playlists is given, update it
 						AutofillData.Playlists = new HashSet<string>(playlistIds);
+						AutofillData.IssuerUid = uid;
 					} else {
 						// Else, switch to all
 						AutofillData.Playlists = null;
+						AutofillData.IssuerUid = uid;
 					}
 
 					DrawNextSong();
 				}
 			} else {
 				// Currently disabled, enable now (with set of playlists if given)
-				AutofillData = new AutoFillData();
+				AutofillData = new AutoFillData {IssuerUid = uid};
 				if (playlistIds != null && playlistIds.Length != 0) {
 					AutofillData.Playlists = new HashSet<string>(playlistIds);
 				} else {
