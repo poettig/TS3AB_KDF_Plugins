@@ -68,7 +68,7 @@ namespace KDFCommands {
 			public override (Func<string> action, bool removeOnResourceEnd) Create(
 				ExecutionInformation info, string command, string args) {
 				if (!string.IsNullOrWhiteSpace(args) && !int.TryParse(args, out _))
-					throw new CommandException("Skip expects no parameters or a number",
+					throw new CommandException("Skip expects no parameters or a number.",
 						CommandExceptionReason.CommandError);
 				return (() => ExecuteCommandWithArgs(info, command, args), true);
 			}
@@ -205,10 +205,10 @@ namespace KDFCommands {
 
 			command = command.ToLower();
 			if (string.IsNullOrWhiteSpace(command))
-				throw new CommandException("No command to vote for given", CommandExceptionReason.CommandError);
+				throw new CommandException("No command to vote for given.", CommandExceptionReason.CommandError);
 
 			if (!VotableCommands.Commands.TryGetValue(command, out var votableCommand))
-				throw new CommandException($"The given command \"{command}\" can't be voted for",
+				throw new CommandException($"The given command \"{command}\" can't be put up to vote.",
 					CommandExceptionReason.CommandError);
 
 			bool voteAdded;

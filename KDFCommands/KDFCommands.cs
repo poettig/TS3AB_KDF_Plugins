@@ -219,8 +219,8 @@ namespace KDFCommands {
 				ts3Client, ts3FullClient, parts, "");
 		}
 
-		[Command("youtubebyuid")]
-		public static string CommandYoutubeByUid(
+		[Command("youtubewithuid")]
+		public static string CommandYoutubeWithUid(
 			PlayManager playManager,
 			PlaylistManager playlistManager,
 			ExecutionInformation execInfo,
@@ -445,7 +445,7 @@ namespace KDFCommands {
 
 			if (playlistId == null) {
 				throw new CommandException(
-					"No playlist with the name '" + pNameSpotify + "' found for spotify user '" + username + "'",
+					"No playlist with the name '" + pNameSpotify + "' found for spotify user '" + username + "'.",
 					CommandExceptionReason.CommandError);
 			}
 
@@ -631,15 +631,27 @@ namespace KDFCommands {
 		}
 
 		private static SortedSet<int> ParseAndMap(PlayQueue playQueue, string indicesString) {
-			return new SortedSet<int>(
-				ParseIndicesInBounds(indicesString, 1, playQueue.Items.Count - playQueue.Index - 1)
-					.Select(entry => entry + playQueue.Index));
+			return new SortedSet<int>(ParseIndicesInBounds(indicesString, 1, playQueue.Items.Count - playQueue.Index - 1).Select(entry => entry + playQueue.Index));
+		}
+		
+		[Command("delwithuid")]
+		public static string CommandDeleteWithUid(PlayManager playManager, CallerInfo ci, ExecutionInformation info, TsFullClient ts3FullClient, string uidStr, string idList) {
+			// Check if user exists, throws exception if not.
+			Uid uid = Uid.To(uidStr);
+			ClientUtility.GetClientNameFromUid(ts3FullClient, uid);
+			return CommandDeleteInternal(playManager, ci, info, uid, idList);
 		}
 
 		[Command("del")]
-		public static void CommandDelete(
-			PlayManager playManager, ExecutionInformation info, InvokerData invoker, ClientCall cc,
-			Ts3Client ts3Client, string idList) {
+		public static string CommandDelete(PlayManager playManager, CallerInfo ci, ExecutionInformation info, InvokerData invoker, string idList) {
+			return CommandDeleteInternal(playManager, ci, info, invoker.ClientUid, idList);
+		}
+	
+		private static string CommandDeleteInternal(PlayManager playManager, CallerInfo ci, ExecutionInformation info, Uid uid, string idList) {
+			if (uid.ToString() == "Anonymous") {
+				throw new CommandException("You can't delete songs as anonymous user.", CommandExceptionReason.Unauthorized);
+			}
+			
 			var queue = playManager.Queue;
 			var currentSongIndex = queue.Index;
 
@@ -651,16 +663,16 @@ namespace KDFCommands {
 			lock (playManager.Lock) {
 				SortedSet<int> indices = ParseAndMap(queue, idList);
 
-				foreach (int index in indices.Reverse()) {
-					QueueItem item = queue.Items[index];
-					if (invoker.ClientUid == item.MetaData.ResourceOwnerUid || info.HasRights(RightDeleteOther)) {
-						queue.Remove(index);
-						succeeded.Add((index - currentSongIndex, item.AudioResource.ResourceTitle));
-					} else {
-						failed.Add((index - currentSongIndex, item.AudioResource.ResourceTitle));
-					}
+			foreach (int index in indices.Reverse()) {
+				QueueItem item = queue.Items[index];
+				if (uid == item.MetaData.ResourceOwnerUid || (!ci.ApiCall && info.HasRights(RightDeleteOther))) {
+					queue.Remove(index);
+					succeeded.Add((index - currentSongIndex, item.AudioResource.ResourceTitle));
+				} else {
+					failed.Add((index - currentSongIndex, item.AudioResource.ResourceTitle));
 				}
 			}
+		}
 
 			succeeded.Reverse();
 			failed.Reverse();
@@ -684,7 +696,7 @@ namespace KDFCommands {
 				}
 			}
 
-			ClientUtility.SendMessage(ts3Client, cc, output.ToString());
+			return output.ToString();
 		}
 
 		public class QueueItemInfo {
@@ -747,10 +759,8 @@ namespace KDFCommands {
 			InvokerData invoker,
 			string uidStr) {
 
-			// Check if user exists, throws exception if not.
-			var uid = Uid.To(uidStr);
-			ClientUtility.CheckOnlineThrow(ts3FullClient, uid);
-			return CommandQueueInternal(info, uid, uidStr);
+			// If the uid is garbage, the queue will be completely hidden.
+			return CommandQueueInternal(info, Uid.To(uidStr), uidStr);
 		}
 
 		[Command("queue")]
@@ -976,16 +986,16 @@ namespace KDFCommands {
 		[Command("autofilloff")]
 		private void CommandAutofillOff(InvokerData invoker) { Autofill.Disable(invoker.ClientUid); }
 
-		[Command("autofilloffbyuid")]
-		private void CommandAutofillOffByUid(string uid) { Autofill.Disable(Uid.To(uid)); }
+		[Command("autofilloffwithuid")]
+		private void CommandAutofillOffWithUid(string uid) { Autofill.Disable(Uid.To(uid)); }
 
 		[Command("autofill")]
 		public void CommandAutofill(InvokerData invoker, string[] playlistIds = null) {
 			Autofill.CommandAutofill(invoker.ClientUid, playlistIds);
 		}
 
-		[Command("autofillbyuid")]
-		public void CommandAutofillByUid(string uidStr, string[] playlistIds = null) {
+		[Command("autofillwithuid")]
+		public void CommandAutofillWithUid(string uidStr, string[] playlistIds = null) {
 			var uid = Uid.To(uidStr);
 			ClientUtility.CheckOnlineThrow(ts3FullClient, uid);
 			Autofill.CommandAutofill(uid, playlistIds);
@@ -1004,7 +1014,7 @@ namespace KDFCommands {
 
 			var userChannel = client.Channel;
 			if (botChannel != userChannel)
-				throw new CommandException("You have to be in the same channel as the bot to use votes",
+				throw new CommandException("You have to be in the same channel as the bot to use votes.",
 					CommandExceptionReason.CommandError);
 			Voting.CommandVote(info, uid, botChannel, command, args);
 		}
@@ -1019,7 +1029,7 @@ namespace KDFCommands {
 			var botChannel = ts3FullClient.Book.Clients[ts3FullClient.ClientId].Channel;
 
 			if (botChannel != userChannel.Value)
-				throw new CommandException("You have to be in the same channel as the bot to use votes",
+				throw new CommandException("You have to be in the same channel as the bot to use votes.",
 					CommandExceptionReason.CommandError);
 			var res = Voting.CommandVote(info, invoker.ClientUid, botChannel, command, args);
 			return new JsonValue<Voting.Result>(res, r => null);

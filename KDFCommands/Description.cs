@@ -46,9 +46,10 @@ namespace KDFCommands {
 				Ts3Client = ts3Client;
 				PlayManager = playManager;
 
-				var _ = new Thread(() => DescriptionUpdater(token)) {
+				var descUpdaterThread = new Thread(() => DescriptionUpdater(token)) {
 					IsBackground = true
 				};
+				descUpdaterThread.Start();
 			}
 
 			private void DescriptionUpdater(CancellationToken token) {
