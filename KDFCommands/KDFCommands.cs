@@ -759,10 +759,8 @@ namespace KDFCommands {
 			InvokerData invoker,
 			string uidStr) {
 
-			// Check if user exists, throws exception if not.
-			var uid = Uid.To(uidStr);
-			ClientUtility.CheckOnlineThrow(ts3FullClient, uid);
-			return CommandQueueInternal(info, uid, uidStr);
+			// If the uid is garbage, the queue will be completely hidden.
+			return CommandQueueInternal(info, Uid.To(uidStr), uidStr);
 		}
 
 		[Command("queue")]
