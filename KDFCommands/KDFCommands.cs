@@ -445,7 +445,7 @@ namespace KDFCommands {
 
 			if (playlistId == null) {
 				throw new CommandException(
-					"No playlist with the name '" + pNameSpotify + "' found for spotify user '" + username + "'",
+					"No playlist with the name '" + pNameSpotify + "' found for spotify user '" + username + "'.",
 					CommandExceptionReason.CommandError);
 			}
 
@@ -1014,7 +1014,7 @@ namespace KDFCommands {
 
 			var userChannel = client.Channel;
 			if (botChannel != userChannel)
-				throw new CommandException("You have to be in the same channel as the bot to use votes",
+				throw new CommandException("You have to be in the same channel as the bot to use votes.",
 					CommandExceptionReason.CommandError);
 			Voting.CommandVote(info, uid, botChannel, command, args);
 		}
@@ -1029,7 +1029,7 @@ namespace KDFCommands {
 			var botChannel = ts3FullClient.Book.Clients[ts3FullClient.ClientId].Channel;
 
 			if (botChannel != userChannel.Value)
-				throw new CommandException("You have to be in the same channel as the bot to use votes",
+				throw new CommandException("You have to be in the same channel as the bot to use votes.",
 					CommandExceptionReason.CommandError);
 			Voting.CommandVote(info, invoker.ClientUid, botChannel, command, args);
 		}
