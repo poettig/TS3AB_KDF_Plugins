@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using Newtonsoft.Json;
+using NLog.Fluent;
 using TS3AudioBot;
 using TS3AudioBot.CommandSystem;
 using TS3AudioBot.CommandSystem.Text;
@@ -16,6 +17,7 @@ using TSLib.Full.Book;
 
 namespace KDFCommands {
 	public static class VotableCommands {
+		private static readonly NLog.Logger Log = NLog.LogManager.GetCurrentClassLogger();
 		public abstract class AVotableCommand {
 			public static E<LocalStr> AreEmpty(string args) {
 				if (string.IsNullOrEmpty(args))
@@ -38,7 +40,9 @@ namespace KDFCommands {
 			builder.Append("!").Append(command);
 			if (args != null)
 				builder.Append(' ').Append(args);
-			return CommandManager.ExecuteCommand(info, builder.ToString());
+			string cmd = builder.ToString();
+			Log.Info($"Vote succeeded, executing command: {cmd}");
+			return CommandManager.ExecuteCommand(info, cmd);
 		}
 
 		public static readonly Dictionary<string, AVotableCommand> Commands = new Dictionary<string, AVotableCommand>(
