@@ -22,7 +22,9 @@ using TS3AudioBot.Sessions;
 using TS3AudioBot.Web.Api;
 using TSLib;
 using TSLib.Full;
+using TSLib.Full.Book;
 using TSLib.Helper;
+using TSLib.Messages;
 
 namespace KDFCommands {
 	public class KDFCommandsPlugin : IBotPlugin {
@@ -64,12 +66,22 @@ namespace KDFCommands {
 			string uidStr = null
 		);
 
-		private PlayManager playManager;
-		private TsFullClient ts3FullClient;
+		private readonly Player player;
+		private readonly PlayManager playManager;
+		private readonly PlaylistManager playlistManager;
 
-		private Voting Voting { get; }
-		private Autofill Autofill { get; }
-		private Description Description { get; }
+		private readonly TsFullClient ts3FullClient;
+		private readonly Ts3Client ts3Client;
+
+		private readonly ConfBot config;
+
+		private Voting Voting { get; set; }
+		private Autofill Autofill { get; set; }
+		private Description Description { get; set; }
+
+		private ChannelUserList BotChannelUserList { get; set; }
+
+		private ClientId BotId => ts3FullClient.ClientId;
 
 		public KDFCommandsPlugin(
 			Player player,
@@ -80,20 +92,51 @@ namespace KDFCommands {
 			CommandManager commandManager,
 			ConfBot config, 
 			Bot bot) {
+			this.player = player;
 			this.playManager = playManager;
+			this.playlistManager = playlistManager;
+
 			this.ts3FullClient = ts3FullClient;
 			bot.RegenerateStatusImage();
-			commandManager.RegisterCollection(Bag);
+			this.ts3Client = ts3Client;
+			this.config = config;
 
-			Voting = new Voting(ts3Client, ts3FullClient, config);
-			Autofill = new Autofill(ts3Client, playManager, playlistManager, ts3FullClient);
-			Description = new Description(player, ts3Client, playManager);
+			commandManager.RegisterCollection(Bag);
+			
 		}
 
 		public void Initialize() {
 			playManager.AfterResourceStarted += ResourceStarted;
 			playManager.PlaybackStopped += PlaybackStopped;
 			playManager.ResourceStopped += OnResourceStopped;
+
+			Voting = new Voting(ts3Client, ts3FullClient, config);
+			Autofill = new Autofill(ts3Client, playManager, playlistManager, ts3FullClient);
+			Description = new Description(player, ts3Client, playManager);
+
+			BotChannelUserList = new ChannelUserList(BotId, ts3FullClient);
+			BotChannelUserList.OnChannelChanged += OnBotChannelChanged;
+		}
+
+		private void OnBotChannelChanged(object sender, ChannelUserListChangedEventArgs e) {
+			if(e.NewChannel) {
+				Log.Info("Bot switched channel, stopping votes");
+				Voting.CancelAll();
+			}
+
+			Voting.OnBotChannelChanged(BotChannelUserList);
+		}
+
+		public void Dispose() {
+			playManager.AfterResourceStarted -= ResourceStarted;
+			playManager.PlaybackStopped -= PlaybackStopped;
+			playManager.ResourceStopped -= OnResourceStopped;
+
+			BotChannelUserList.Dispose();
+			Description.Dispose();
+			Autofill.Disable();
+
+			Voting.CancelAll();
 		}
 
 		private void OnResourceStopped(object sender, SongEndEventArgs e) { Voting.OnSongEnd(); }
@@ -1017,7 +1060,7 @@ namespace KDFCommands {
 			if (botChannel != userChannel)
 				throw new CommandException("You have to be in the same channel as the bot to use votes.",
 					CommandExceptionReason.CommandError);
-			var res = Voting.CommandVote(info, uid, botChannel, command, args);
+			var res = Voting.CommandVote(info, uid, BotChannelUserList, command, args);
 			return new JsonValue<Voting.Result>(res, r => null);
 		}
 
@@ -1033,15 +1076,8 @@ namespace KDFCommands {
 			if (botChannel != userChannel.Value)
 				throw new CommandException("You have to be in the same channel as the bot to use votes.",
 					CommandExceptionReason.CommandError);
-			var res = Voting.CommandVote(info, invoker.ClientUid, botChannel, command, args);
+			var res = Voting.CommandVote(info, invoker.ClientUid, BotChannelUserList, command, args);
 			return new JsonValue<Voting.Result>(res, r => null);
-		}
-
-		public void Dispose() {
-			playManager.AfterResourceStarted -= ResourceStarted;
-			playManager.PlaybackStopped -= PlaybackStopped;
-
-			Description.Dispose();
 		}
 	}
 }

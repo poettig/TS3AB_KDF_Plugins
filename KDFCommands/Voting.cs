@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -97,13 +97,11 @@ namespace KDFCommands {
 		public class CurrentVoteData {
 			public string Command { get; }
 			public Func<string> Executor { get; }
-			public int Needed { get; }
 			public bool RemoveOnResourceEnd { get; }
 			public HashSet<Uid> Voters { get; } = new HashSet<Uid>();
 
 			public CurrentVoteData(string command, int clientCount, Func<string> executor, bool removeOnResourceEnd) {
 				Command = command;
-				Needed = Math.Max((clientCount) / 2 + 1, 1);
 				Executor = executor;
 				RemoveOnResourceEnd = removeOnResourceEnd;
 			}
@@ -112,13 +110,15 @@ namespace KDFCommands {
 		private readonly Dictionary<string, CurrentVoteData> _currentVotes =
 			new Dictionary<string, CurrentVoteData>();
 
+		public int Needed { get; private set; }
+
 		private readonly List<CurrentVoteData> _removeOnResourceEnded = new List<CurrentVoteData>();
 
 		public IReadOnlyDictionary<string, CurrentVoteData> CurrentVotes => _currentVotes;
 
 		private readonly Ts3Client _client;
 		private readonly ConfBot _config;
-		private TsFullClient _ts3FullClient;
+		private readonly TsFullClient _ts3FullClient;
 
 		public Voting(Ts3Client client, TsFullClient ts3FullClient, ConfBot config) {
 			_client = client;
@@ -149,6 +149,17 @@ namespace KDFCommands {
 			return null;
 		}
 
+		private void UpdateNeededForUsers(int users) {
+			var n = Math.Max(users / 2 + 1, 1);
+			var old = Needed;
+			Needed = n;
+			if (old <= n)
+				return;
+
+			foreach (var (_, vote) in CurrentVotes)
+				CheckAndFire(vote);
+		}
+
 		public void OnSongEnd() {
 			foreach (var vote in _removeOnResourceEnded) {
 				_currentVotes.Remove(vote.Command);
@@ -156,6 +167,15 @@ namespace KDFCommands {
 			}
 
 			_removeOnResourceEnded.Clear();
+		}
+
+		public void OnBotChannelChanged(ChannelUserList channel) {
+			int clientCount = channel.Ids.Count(CheckClientIncludedInVote);
+			UpdateNeededForUsers(clientCount);
+		}
+
+		public void CancelAll() {
+			_currentVotes.Clear();
 		}
 
 		private void Add(CurrentVoteData vote) {
@@ -171,7 +191,7 @@ namespace KDFCommands {
 		}
 
 		private bool CheckAndFire(CurrentVoteData vote) {
-			if (vote.Needed > vote.Voters.Count) {
+			if (Needed > vote.Voters.Count) {
 				return false;
 			}
 
@@ -208,9 +228,22 @@ namespace KDFCommands {
 			public int VotesNeeded { get; set; }
 		}
 		
+		private bool CheckClientIncludedInVote(ClientId id) {
+			if (_ts3FullClient.ClientId == id) // exclude bot
+				return false;
+
+			var data = _client.GetClientInfoById(id);
+			return data.Ok && !data.Value.OutputMuted && MinIdleTimeForVoteIgnore > data.Value.ClientIdleTime;
+		}
+
+		private CallerInfo CreateCallerInfo() {
+			return new CallerInfo(false)
+				{SkipRightsChecks = true, CommandComplexityMax = _config.Commands.CommandComplexity};
+		}
+
 		public Result CommandVote(
 			ExecutionInformation info,
-			Uid invoker, ChannelId botChannel, string command, string? args = null) {
+			Uid invoker, ChannelUserList channel, string command, string? args = null) {
 
 			command = command.ToLower();
 			if (string.IsNullOrWhiteSpace(command))
@@ -219,6 +252,8 @@ namespace KDFCommands {
 			if (!VotableCommands.Commands.TryGetValue(command, out var votableCommand))
 				throw new CommandException($"The given command \"{command}\" can't be put up to vote.",
 					CommandExceptionReason.CommandError);
+
+			OnBotChannelChanged(channel);
 
 			bool voteAdded;
 			bool votesChanged;
@@ -239,41 +274,26 @@ namespace KDFCommands {
 						_client.SendChannelMessage($"Removed vote of {ClientUtility.GetClientNameFromUid(_ts3FullClient, invoker)} and stopped vote for \"{command}\".");
 					} else {
 						votesChanged = false;
-						_client.SendChannelMessage($"Removed vote of {ClientUtility.GetClientNameFromUid(_ts3FullClient, invoker)} for \"{command}\" ({currentVote.Voters.Count} votes of {currentVote.Needed})");
+						_client.SendChannelMessage($"Removed vote of {ClientUtility.GetClientNameFromUid(_ts3FullClient, invoker)} for \"{command}\" ({currentVote.Voters.Count} votes of {Needed})");
 					}
 
 					voteCompleted = false;
 				} else {
 					currentVote.Voters.Add(invoker);
 					voteAdded = true;
-					_client.SendChannelMessage($"Added vote of {ClientUtility.GetClientNameFromUid(_ts3FullClient, invoker)} for \"{command}\" ({currentVote.Voters.Count} votes of {currentVote.Needed})");
+					_client.SendChannelMessage($"Added vote of {ClientUtility.GetClientNameFromUid(_ts3FullClient, invoker)} for \"{command}\" ({currentVote.Voters.Count} votes of {Needed})");
 					votesChanged = false;
 					voteCompleted = CheckAndFire(currentVote);
 				}
 			} else {
-				var ci = new CallerInfo(false)
-					{SkipRightsChecks = true, CommandComplexityMax = _config.Commands.CommandComplexity};
-
-				bool CheckClient(Client client) {
-					if (_ts3FullClient.ClientId == client.Id) // exclude bot
-						return false;
-					if (client.OutputMuted) // exclude muted
-						return false;
-
-					var data = _client.GetClientInfoById(client.Id);
-					return !data.Ok || data.Value.ClientIdleTime <
-					       MinIdleTimeForVoteIgnore; // include if data not ok or not long enough idle
-				}
-
-				int clientCount = ClientUtility.CountClientsInChannel(_ts3FullClient, botChannel, CheckClient);
-				info.AddModule(ci);
+				info.AddModule(CreateCallerInfo());
 				var (executor, removeOnResourceEnd) = votableCommand.Create(info, command, args);
-				currentVote = new CurrentVoteData(command, clientCount, executor, removeOnResourceEnd);
+				currentVote = new CurrentVoteData(command, Needed, executor, removeOnResourceEnd);
 				Add(currentVote);
 				voteAdded = true;
 				currentVote.Voters.Add(invoker);
 				votesChanged = true;
-				_client.SendChannelMessage($"{ClientUtility.GetClientNameFromUid(_ts3FullClient, invoker)} started vote for \"{command}\" ({currentVote.Voters.Count} votes of {currentVote.Needed})");
+				_client.SendChannelMessage($"{ClientUtility.GetClientNameFromUid(_ts3FullClient, invoker)} started vote for \"{command}\" ({currentVote.Voters.Count} votes of {Needed})");
 				voteCompleted = CheckAndFire(currentVote);
 			}
 
@@ -282,7 +302,7 @@ namespace KDFCommands {
 				VoteComplete = voteCompleted,
 				VotesChanged = votesChanged,
 				VoteCount = currentVote.Voters.Count,
-				VotesNeeded = currentVote.Needed
+				VotesNeeded = Needed
 			};
 		}
 	}
