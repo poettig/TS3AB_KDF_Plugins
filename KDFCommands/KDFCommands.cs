@@ -78,10 +78,11 @@ namespace KDFCommands {
 			Ts3Client ts3Client,
 			TsFullClient ts3FullClient,
 			CommandManager commandManager,
-			ConfBot config) {
+			ConfBot config, 
+			Bot bot) {
 			this.playManager = playManager;
 			this.ts3FullClient = ts3FullClient;
-			playManager.OnPlaybackEnded();
+			bot.RegenerateStatusImage();
 			commandManager.RegisterCollection(Bag);
 
 			Voting = new Voting(ts3Client, ts3FullClient, config);
