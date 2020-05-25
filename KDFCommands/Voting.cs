@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -103,7 +103,7 @@ namespace KDFCommands {
 
 			public CurrentVoteData(string command, int clientCount, Func<string> executor, bool removeOnResourceEnd) {
 				Command = command;
-				Needed = Math.Max((clientCount + 1) / 2, 1);
+				Needed = Math.Max((clientCount) / 2 + 1, 1);
 				Executor = executor;
 				RemoveOnResourceEnd = removeOnResourceEnd;
 			}
