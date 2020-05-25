@@ -17,12 +17,29 @@ namespace KDFCommands {
 			Username = username;
 		}
 
+		private static void AppendPadded(StringBuilder builder, int i) {
+			if (i < 10)
+				builder.Append(0);
+			builder.Append(i);
+		}
+
+		private static void AppendTimeSpan(StringBuilder builder, TimeSpan timeSpan) {
+			if (timeSpan.Hours > 0) {
+				AppendPadded(builder, timeSpan.Hours);
+				builder.Append(':');
+			}
+			AppendPadded(builder, timeSpan.Minutes);
+			builder.Append(':');
+			AppendPadded(builder, timeSpan.Seconds);
+		}
+
 		public string MakeDescription(int queueLength, TimeSpan timeLeft) {
 			StringBuilder builder = new StringBuilder();
 			builder.Append("[");
 			if (Username != null)
 				builder.Append(Username);
-			builder.Append(" ").Append($"{timeLeft:mm\\:ss}");
+			builder.Append(" ");
+			AppendTimeSpan(builder, timeLeft);
 			builder.Append(" Q").Append(queueLength).Append("] ").Append(Title);
 			if (PlaylistId != null)
 				builder.Append(" <Playlist: ").Append(PlaylistId).Append(">");
