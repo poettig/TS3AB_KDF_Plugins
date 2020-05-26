@@ -5,6 +5,7 @@ using TS3AudioBot.CommandSystem;
 using TSLib;
 using TSLib.Full;
 using TSLib.Full.Book;
+using TSLib.Messages;
 
 namespace KDFCommands {
 	public static class ClientUtility {
@@ -13,17 +14,21 @@ namespace KDFCommands {
 			return client.Book.Clients.Values.Count(c => c.Channel == channel && predicate(c));
 		}
 
-		public static Client ClientByUidOnline(TsFullClient ts3FullClient, Uid uid) {
-			foreach (var (_, value) in ts3FullClient.Book.Clients) {
+		public static R<ClientList> ClientByUidOnline(TsFullClient ts3FullClient, Uid uid) {
+			var res = ts3FullClient.ClientList(ClientListOptions.uid);
+			if (!res.Ok)
+				return R.Err;
+
+			foreach (var value in res.Value) {
 				if (value.Uid == uid)
 					return value;
 			}
 
-			return null;
+			return R.Err;
 		}
 
 		public static bool ClientIsOnline(TsFullClient ts3FullClient, Uid uid) {
-			return ClientByUidOnline(ts3FullClient, uid) != null;
+			return ClientByUidOnline(ts3FullClient, uid).Ok;
 		}
 
 		public static void SendMessage(Ts3Client client, ClientCall cc, string message) {

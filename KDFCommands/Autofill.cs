@@ -84,7 +84,7 @@ namespace KDFCommands {
 		public void Disable(Uid uid) {
 			// Explicitly requested to turn it off
 			Disable();
-			Ts3Client.SendChannelMessage("[" + ClientUtility.ClientByUidOnline(Ts3FullClient, uid).Name + "] " +
+			Ts3Client.SendChannelMessage("[" + ClientUtility.ClientByUidOnline(Ts3FullClient, uid).Value.Name + "] " +
 			                             Status("now"));
 		}
 

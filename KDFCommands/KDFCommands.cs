@@ -1050,33 +1050,29 @@ namespace KDFCommands {
 			TsFullClient ts3FullClient, ExecutionInformation info,
 			string clientUid, string command, string? args = null) {
 			var uid = Uid.To(clientUid);
-			var botChannel = ts3FullClient.Book.Clients[ts3FullClient.ClientId].Channel;
 
 			var client = ClientUtility.ClientByUidOnline(ts3FullClient, uid);
-			if (client == null)
+			if (!client.Ok)
 				throw new CommandException("Could not get user", CommandExceptionReason.InternalError);
 
-			var userChannel = client.Channel;
-			if (botChannel != userChannel)
-				throw new CommandException("You have to be in the same channel as the bot to use votes.",
-					CommandExceptionReason.CommandError);
-			var res = Voting.CommandVote(info, uid, BotChannelUserList, command, args);
-			return new JsonValue<Voting.Result>(res, r => null);
+			return CommandStartVote(info, uid, client.Value.ChannelId, command, args);
 		}
 
 		[Command("vote")]
-		public JsonValue<Voting.Result> CommandStartVote(
-			TsFullClient ts3FullClient, ExecutionInformation info,
-			ClientCall invoker, string command, string? args = null) {
-			var userChannel = invoker.ChannelId;
-			if (!userChannel.HasValue)
+		public JsonValue<Voting.Result> CommandStartVote(ExecutionInformation info, ClientCall invoker, string command, string? args = null) {
+			if (!invoker.ChannelId.HasValue)
 				throw new CommandException("Could not get user channel", CommandExceptionReason.InternalError);
-			var botChannel = ts3FullClient.Book.Clients[ts3FullClient.ClientId].Channel;
 
-			if (botChannel != userChannel.Value)
+			return CommandStartVote(info, invoker.ClientUid, invoker.ChannelId.Value, command, args);
+		}
+
+		private JsonValue<Voting.Result> CommandStartVote(ExecutionInformation info,
+			Uid client, ChannelId userChannel, string command, string args) {
+			var botChannel = BotChannelUserList.Channel;
+			if (botChannel != userChannel)
 				throw new CommandException("You have to be in the same channel as the bot to use votes.",
 					CommandExceptionReason.CommandError);
-			var res = Voting.CommandVote(info, invoker.ClientUid, BotChannelUserList, command, args);
+			var res = Voting.CommandVote(info, client, BotChannelUserList, command, args);
 			return new JsonValue<Voting.Result>(res, r => null);
 		}
 	}
