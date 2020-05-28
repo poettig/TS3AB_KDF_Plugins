@@ -39,7 +39,7 @@ namespace KDFCommands {
 			if (Username != null)
 				builder.Append(Username);
 			builder.Append(" ");
-			AppendTimeSpan(builder, timeLeft);
+			AppendTimeSpan(builder, timeLeft.Duration());
 			builder.Append(" Q").Append(queueLength).Append("] ").Append(Title);
 			if (PlaylistId != null)
 				builder.Append(" <Playlist: ").Append(PlaylistId).Append(">");
