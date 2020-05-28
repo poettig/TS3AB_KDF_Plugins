@@ -212,7 +212,7 @@ namespace KDFCommands {
 			var res = PlayManager.Enqueue(item);
 			
 			// Only draw nextr song if autofill was not disabled in the meantime
-			if (!AutofillEnabled) {
+			if (AutofillEnabled) {
 				DrawNextSong();
 			} 
 			return res;
