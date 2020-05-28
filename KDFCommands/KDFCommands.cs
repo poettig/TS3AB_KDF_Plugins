@@ -142,6 +142,10 @@ namespace KDFCommands {
 		private void OnResourceStopped(object sender, SongEndEventArgs e) { Voting.OnSongEnd(); }
 
 		private void ResourceStarted(object sender, PlayInfoEventArgs e) {
+			using (System.IO.StreamWriter statfile = new System.IO.StreamWriter("stats_play.txt", true)) {
+				statfile.WriteLine(DateTimeOffset.UtcNow.ToUnixTimeSeconds() + ":::" + e.ResourceData.ResourceTitle + ":::" + e.ResourceData.ResourceId + ":::" + e.PlayResource.Meta.ContainingPlaylistId + ":::" + e.PlayResource.Meta.ResourceOwnerUid);
+			}
+			
 			var owner = e.PlayResource.Meta.ResourceOwnerUid;
 			Description.Data = new DescriptionData(
 				e.ResourceData.ResourceTitle,

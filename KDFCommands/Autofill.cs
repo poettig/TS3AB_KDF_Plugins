@@ -121,7 +121,7 @@ namespace KDFCommands {
 
 		private QueueItem DrawRandom() {
 			// Play random song from a random playlist currently in the selected set
-
+			
 			// Get total number of songs from all selected playlists
 			var numSongs = 0;
 			var playlistsUnfiltered = PlaylistManager.GetAvailablePlaylists().UnwrapThrow();
@@ -191,8 +191,8 @@ namespace KDFCommands {
 					CommandExceptionReason.InternalError);
 			}
 
-			using (System.IO.StreamWriter statfile = new System.IO.StreamWriter("stats.txt", true)) {
-				statfile.WriteLine(resource.ResourceTitle + ":" + resource.ResourceId);
+			using (System.IO.StreamWriter statfile = new System.IO.StreamWriter("stats_autofill.txt", true)) {
+				statfile.WriteLine(DateTimeOffset.UtcNow.ToUnixTimeSeconds() + ":::" + resource.ResourceTitle + ":::" + resource.ResourceId);
 			}
 			return new QueueItem(resource, new MetaData(Ts3FullClient.Identity.ClientUid, plId));
 		}
@@ -210,7 +210,11 @@ namespace KDFCommands {
 			Log.Info("Autofilling the song '{0}' from playlist '{1}'.", item.AudioResource.ResourceTitle,
 				item.MetaData.ContainingPlaylistId);
 			var res = PlayManager.Enqueue(item);
-			DrawNextSong();
+			
+			// Only draw nextr song if autofill was not disabled in the meantime
+			if (!AutofillEnabled) {
+				DrawNextSong();
+			} 
 			return res;
 		}
 
