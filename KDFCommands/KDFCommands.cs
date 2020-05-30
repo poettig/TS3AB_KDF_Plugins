@@ -113,9 +113,6 @@ namespace KDFCommands {
 			Voting = new Voting(ts3Client, ts3FullClient, config);
 			Autofill = new Autofill(ts3Client, playManager, playlistManager, ts3FullClient);
 			Description = new Description(player, ts3Client, playManager);
-
-			BotChannelUserList = new ChannelUserList(BotId, ts3FullClient);
-			BotChannelUserList.OnChannelChanged += OnBotChannelChanged;
 		}
 
 		private void OnBotChannelChanged(object sender, ChannelUserListChangedEventArgs e) {
@@ -124,7 +121,7 @@ namespace KDFCommands {
 				Voting.CancelAll();
 			}
 
-			Voting.OnBotChannelChanged(BotChannelUserList);
+			Voting.OnBotChannelChanged();
 		}
 
 		public void Dispose() {
@@ -132,7 +129,6 @@ namespace KDFCommands {
 			playManager.PlaybackStopped -= PlaybackStopped;
 			playManager.ResourceStopped -= OnResourceStopped;
 
-			BotChannelUserList.Dispose();
 			Description.Dispose();
 			Autofill.Disable();
 
@@ -766,7 +762,7 @@ namespace KDFCommands {
 
 		private void AppendSong(StringBuilder target, QueueItemInfo qi, bool restrict) {
 			target.Append(restrict ? "Hidden Song Name" : qi.Title);
-			target.Append(" - ").Append(ClientUtility.GetUserNameOrBotName(qi.UserId, ts3FullClient));
+			target.Append(" - ").Append(ClientUtility.GetClientNameFromUid(ts3FullClient, Uid.To(qi.UserId)));
 
 			if (qi.ContainingListId != null)
 				target.Append(" <Playlist: ").Append(qi.ContainingListId).Append(">");
@@ -1035,7 +1031,11 @@ namespace KDFCommands {
 		private void CommandAutofillOff(InvokerData invoker) { Autofill.Disable(invoker.ClientUid); }
 
 		[Command("autofilloffwithuid")]
-		private void CommandAutofillOffWithUid(string uid) { Autofill.Disable(Uid.To(uid)); }
+		private void CommandAutofillOffWithUid(string uidStr) {
+			var uid = Uid.To(uidStr);
+			ClientUtility.CheckOnlineThrow(ts3FullClient, uid);
+			Autofill.Disable(uid);
+		}
 
 		[Command("autofill")]
 		public void CommandAutofill(InvokerData invoker, string[] playlistIds = null) {
@@ -1049,34 +1049,37 @@ namespace KDFCommands {
 			Autofill.CommandAutofill(uid, playlistIds);
 		}
 
+		private static void ThrowNotInSameChannel() {
+			throw new CommandException("You have to be in the same channel as the bot to use votes.", CommandExceptionReason.CommandError);
+		}
+
 		[Command("votewithuid")]
 		public JsonValue<Voting.Result> CommandStartVoteWithUid(
 			TsFullClient ts3FullClient, ExecutionInformation info,
 			string clientUid, string command, string? args = null) {
 			var uid = Uid.To(clientUid);
 
-			var client = ClientUtility.ClientByUidOnline(ts3FullClient, uid);
-			if (!client.Ok)
-				throw new CommandException("Could not get user", CommandExceptionReason.InternalError);
+			var botChannel = ts3FullClient.Book.CurrentChannel().Id;
+			var hasClientWithUidInBotChannel = ClientUtility.GetClientsByUidOnline(ts3FullClient, uid).Any(c => botChannel == c.Channel);
+			if (!hasClientWithUidInBotChannel)
+				ThrowNotInSameChannel();
 
-			return CommandStartVote(info, uid, client.Value.ChannelId, command, args);
+			return CommandStartVote(info, uid, command, args);
 		}
 
 		[Command("vote")]
 		public JsonValue<Voting.Result> CommandStartVote(ExecutionInformation info, ClientCall invoker, string command, string? args = null) {
 			if (!invoker.ChannelId.HasValue)
 				throw new CommandException("Could not get user channel", CommandExceptionReason.InternalError);
+			var botChannel = ts3FullClient.Book.CurrentChannel().Id;
+			if (botChannel != invoker.ChannelId.Value)
+				ThrowNotInSameChannel();
 
-			return CommandStartVote(info, invoker.ClientUid, invoker.ChannelId.Value, command, args);
+			return CommandStartVote(info, invoker.ClientUid, command, args);
 		}
 
-		private JsonValue<Voting.Result> CommandStartVote(ExecutionInformation info,
-			Uid client, ChannelId userChannel, string command, string args) {
-			var botChannel = BotChannelUserList.Channel;
-			if (botChannel != userChannel)
-				throw new CommandException("You have to be in the same channel as the bot to use votes.",
-					CommandExceptionReason.CommandError);
-			var res = Voting.CommandVote(info, client, BotChannelUserList, command, args);
+		private JsonValue<Voting.Result> CommandStartVote(ExecutionInformation info, Uid client, string command, string args) {
+			var res = Voting.CommandVote(info, client, command, args);
 			return new JsonValue<Voting.Result>(res, r => null);
 		}
 	}

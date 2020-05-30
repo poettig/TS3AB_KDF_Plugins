@@ -153,15 +153,19 @@ namespace KDFCommands {
 			return null;
 		}
 
-		private void UpdateNeededForUsers(int users) {
-			var n = Math.Max(users / 2 + 1, 1);
-			var old = Needed;
-			Needed = n;
-			if (old <= n)
-				return;
+		private void UpdateNeededForUsers(IReadOnlyCollection<Uid> users) {
+			{
+				var n = Math.Max(users.Count / 2 + 1, 1);
+				var old = Needed;
+				Needed = n;
+				if (old <= n)
+					return;
+			}
 
-			foreach (var (_, vote) in CurrentVotes)
+			foreach (var (_, vote) in CurrentVotes) {
+				vote.Voters.IntersectWith(users);
 				CheckAndFire(vote);
+			}
 		}
 
 		public void OnSongEnd() {
@@ -173,9 +177,17 @@ namespace KDFCommands {
 			_removeOnResourceEnded.Clear();
 		}
 
-		public void OnBotChannelChanged(ChannelUserList channel) {
-			int clientCount = channel.Ids.Count(CheckClientIncludedInVote);
-			UpdateNeededForUsers(clientCount);
+		public void OnBotChannelChanged() {
+			var channel = _ts3FullClient.Book.CurrentChannel();
+			if (channel == null) {
+				Log.Warn("OnBotChannelChanged: Could not get bot channel");
+				return;
+			}
+
+			var clients = ClientUtility.GetClientsInChannel(_ts3FullClient, channel.Id)
+				.Where(CheckClientIncludedInVote)
+				.Select(c => c.Uid);
+			UpdateNeededForUsers(clients.ToHashSet());
 		}
 
 		public void CancelAll() {
@@ -232,11 +244,11 @@ namespace KDFCommands {
 			public int VotesNeeded { get; set; }
 		}
 		
-		private bool CheckClientIncludedInVote(ClientId id) {
-			if (_ts3FullClient.ClientId == id) // exclude bot
+		private bool CheckClientIncludedInVote(Client client) {
+			if (_ts3FullClient.ClientId == client.Id) // exclude bot
 				return false;
 
-			var data = _client.GetClientInfoById(id);
+			var data = _client.GetClientInfoById(client.Id);
 			return data.Ok && !data.Value.OutputMuted && MinIdleTimeForVoteIgnore > data.Value.ClientIdleTime;
 		}
 
@@ -247,7 +259,7 @@ namespace KDFCommands {
 
 		public Result CommandVote(
 			ExecutionInformation info,
-			Uid invoker, ChannelUserList channel, string command, string? args = null) {
+			Uid invoker, string command, string? args = null) {
 
 			command = command.ToLower();
 			if (string.IsNullOrWhiteSpace(command))
@@ -257,7 +269,7 @@ namespace KDFCommands {
 				throw new CommandException($"The given command \"{command}\" can't be put up to vote.",
 					CommandExceptionReason.CommandError);
 
-			OnBotChannelChanged(channel);
+			OnBotChannelChanged();
 
 			bool voteAdded;
 			bool votesChanged;

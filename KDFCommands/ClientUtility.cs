@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using TS3AudioBot;
 using TS3AudioBot.CommandSystem;
@@ -9,26 +10,28 @@ using TSLib.Messages;
 
 namespace KDFCommands {
 	public static class ClientUtility {
-		public static E<int> CountClientsInChannel(
-			TsFullClient client, ChannelId channel, Func<Client, bool> predicate) {
-			return client.Book.Clients.Values.Count(c => c.Channel == channel && predicate(c));
+		public static IEnumerable<Client> GetClientsInChannel(TsFullClient client, ChannelId channel) {
+			foreach (Client c in client.Book.Clients.Values) {
+				if (c.Channel == channel) yield return c;
+			}
 		}
 
-		public static R<ClientList> ClientByUidOnline(TsFullClient ts3FullClient, Uid uid) {
-			var res = ts3FullClient.ClientList(ClientListOptions.uid);
-			if (!res.Ok)
-				return R.Err;
+		public static IEnumerable<Client> GetClientsByUidOnline(TsFullClient client, Uid uid) {
+			foreach (Client c in client.Book.Clients.Values) {
+				if (c.Uid == uid) yield return c;
+			}
+		}
 
-			foreach (var value in res.Value) {
-				if (value.Uid == uid)
-					return value;
+		public static R<Client> GetFirstClientByUidOnline(TsFullClient ts3FullClient, Uid uid) {
+			foreach (var client in GetClientsByUidOnline(ts3FullClient, uid)) {
+				return client;
 			}
 
 			return R.Err;
 		}
 
 		public static bool ClientIsOnline(TsFullClient ts3FullClient, Uid uid) {
-			return ClientByUidOnline(ts3FullClient, uid).Ok;
+			return GetFirstClientByUidOnline(ts3FullClient, uid).Ok;
 		}
 
 		public static void SendMessage(Ts3Client client, ClientCall cc, string message) {
@@ -45,22 +48,17 @@ namespace KDFCommands {
 			}
 		}
 
-		public static string GetClientNameFromUid(TsFullClient ts3FullClient, Uid id) {
-			Uid uid = id.Value == "Anonymous" ? ts3FullClient.Identity.ClientUid : id;
-
+		public static string GetClientNameFromUid(TsFullClient ts3FullClient, Uid uid) {
+			var onlineClient = GetFirstClientByUidOnline(ts3FullClient, uid);
+			if (onlineClient.Ok) {
+				return onlineClient.Value.Name;
+			}
+			
 			var result = ts3FullClient.GetClientNameFromUid(uid);
 			if (!result.Ok) {
-				throw new CommandException($"The UID '{id}' does not exist on this server.", CommandExceptionReason.CommandError);
+				throw new CommandException($"The UID '{uid}' does not exist on this server.", CommandExceptionReason.CommandError);
 			}
 			return result.Value.Name;
-		}
-
-		public static string GetUserNameOrBotName(string userId, TsFullClient ts3FullClient) {
-			if (userId == null) {
-				return GetClientNameFromUid(ts3FullClient, ts3FullClient.Identity.ClientUid);
-			}
-
-			return GetClientNameFromUid(ts3FullClient, new Uid(userId));
 		}
 	}
 }
