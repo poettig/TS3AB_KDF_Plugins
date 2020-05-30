@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using TS3AudioBot;
 using TS3AudioBot.Audio;
@@ -280,6 +280,9 @@ namespace KDFCommands {
 						found = true;
 						break;
 					}
+
+					if (!AutofillEnabled)
+						break;
 				}
 
 				if (!found) {
