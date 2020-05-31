@@ -211,7 +211,7 @@ namespace KDFCommands {
 				item.MetaData.ContainingPlaylistId);
 			var res = PlayManager.Enqueue(item);
 			
-			// Only draw nextr song if autofill was not disabled in the meantime
+			// Only draw next song if autofill was not disabled in the meantime
 			if (AutofillEnabled) {
 				DrawNextSong();
 			} 
