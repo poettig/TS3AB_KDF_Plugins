@@ -209,8 +209,8 @@ namespace KDFCommands {
 			var numSongsAdded = 0;
 			var allItems = new List<QueueItem>();
 			for (var i = 0; i < numPlaylists; i++) {
-				var plistId = parts[i];
-				var plist = playlistManager.LoadPlaylist(plistId).UnwrapThrow();
+				var userProvidedId = parts[i];
+				var (plist, id) = playlistManager.LoadPlaylist(userProvidedId).UnwrapThrow();
 				var items = new List<PlaylistItem>(plist.Items);
 
 				int numSongsToTake = Tools.Clamp(songsPerPlaylist, 0, plist.Items.Count);
@@ -220,7 +220,7 @@ namespace KDFCommands {
 
 				numSongsAdded += numSongsToTake;
 
-				var meta = new MetaData(invoker.ClientUid, plistId);
+				var meta = new MetaData(invoker.ClientUid, id);
 				Shuffle(items, new Random());
 				allItems.AddRange(items.Take(numSongsToTake).Select(item => new QueueItem(item.AudioResource, meta)));
 			}
@@ -542,17 +542,20 @@ namespace KDFCommands {
 			ClientCall cc,
 			Ts3Client ts3Client,
 			TsFullClient ts3FullClient,
-			string listId,
+			string userProvidedId,
 			string message) {
+			if(!playlistManager.TryGetPlaylistId(userProvidedId, out var id))
+				throw new CommandException($"The playlist {userProvidedId} does not exist.", CommandExceptionReason.CommandError);
+
 			string[] parts = Regex.Split(message, ";+");
 			ClientUtility.SendMessage(ts3Client, cc,
-				"Received your request to add " + parts.Length + " songs to the playlist '" + listId +
+				"Received your request to add " + parts.Length + " songs to the playlist '" + id +
 				"', processing...");
 
 			PartHandler urlHandler = ListAddUrl;
 			PartHandler queryHandler = ListAddQuery;
 			ParseMulti(urlHandler, queryHandler, playManager, playlistManager, execInfo, resolver, invoker, cc,
-				ts3Client, ts3FullClient, parts, listId);
+				ts3Client, ts3FullClient, parts, id);
 		}
 
 		private static string ListAddUrl(
@@ -707,16 +710,16 @@ namespace KDFCommands {
 			lock (playManager.Lock) {
 				SortedSet<int> indices = ParseAndMap(queue, idList);
 
-			foreach (int index in indices.Reverse()) {
-				QueueItem item = queue.Items[index];
-				if (uid == item.MetaData.ResourceOwnerUid || (!ci.ApiCall && info.HasRights(RightDeleteOther))) {
-					queue.Remove(index);
-					succeeded.Add((index - currentSongIndex, item.AudioResource.ResourceTitle));
-				} else {
-					failed.Add((index - currentSongIndex, item.AudioResource.ResourceTitle));
+				foreach (int index in indices.Reverse()) {
+					QueueItem item = queue.Items[index];
+					if (uid == item.MetaData.ResourceOwnerUid || (!ci.ApiCall && info.HasRights(RightDeleteOther))) {
+						queue.Remove(index);
+						succeeded.Add((index - currentSongIndex, item.AudioResource.ResourceTitle));
+					} else {
+						failed.Add((index - currentSongIndex, item.AudioResource.ResourceTitle));
+					}
 				}
 			}
-		}
 
 			succeeded.Reverse();
 			failed.Reverse();
@@ -954,13 +957,13 @@ namespace KDFCommands {
 
 		[Command("list search item")]
 		public static JsonValue<SearchListItemsResult> CommandSearchItem(
-			CallerInfo callerInfo, UserSession session, PlaylistManager playlistManager, string listId, string query) {
+			CallerInfo callerInfo, UserSession session, PlaylistManager playlistManager, string userProvidedId, string query) {
 			query = query.ToLower();
-			var plist = playlistManager.LoadPlaylist(listId).UnwrapThrow();
+			var (plist, id) = playlistManager.LoadPlaylist(userProvidedId).UnwrapThrow();
 			var results = plist.Items.Select((item, idx) => (item, idx))
 				.Where((item, idx) => Matches(item.item.AudioResource.ResourceTitle.ToLower(), query)).ToList();
 
-			var searchResults = new SearchListItemsResult(listId, results);
+			var searchResults = new SearchListItemsResult(id, results);
 			session.Set(SessionKeyListSearchResults, searchResults);
 			return new JsonValue<SearchListItemsResult>(searchResults, res => {
 				if (res.Items.Count == 0)
@@ -988,29 +991,31 @@ namespace KDFCommands {
 
 		[Command("list search add")]
 		public static string CommandSearchAdd(
-			ExecutionInformation info, UserSession session, PlaylistManager playlistManager, string listId) {
+			ExecutionInformation info, UserSession session, PlaylistManager playlistManager, string userProvidedId) {
 			if (!session.Get<List<(PlaylistItem, int)>>(SessionKeyListSearchResults, out var items)) {
 				throw new CommandException("No search results found.", CommandExceptionReason.CommandError);
 			}
 
-			playlistManager.ModifyPlaylist(listId, list => {
+			string id = null;
+			playlistManager.ModifyPlaylist(userProvidedId, (list, lid) => {
+				id = lid;
 				MainCommands.CheckPlaylistModifiable(list, info, "modify");
 				list.AddRange(items.Select(item => item.Item1)).UnwrapThrow();
 			}).UnwrapThrow();
-			return $"Added {items.Count} items to {listId}.";
+			return $"Added {items.Count} items to {id}.";
 		}
 
 		[Command("list item queue")]
 		public static string CommandItemQueue(
-			InvokerData invoker, PlaylistManager playlistManager, PlayManager playManager, string listId,
+			InvokerData invoker, PlaylistManager playlistManager, PlayManager playManager, string userProvidedId,
 			string indicesString, string uid = null) {
-			var plist = playlistManager.LoadPlaylist(listId).UnwrapThrow();
+			var (plist, id) = playlistManager.LoadPlaylist(userProvidedId).UnwrapThrow();
 			var indices = ParseIndicesInBounds(indicesString, 0, plist.Items.Count - 1);
 			var items = new List<PlaylistItem>(indices.Count);
 			items.AddRange(indices.Select(index => plist.Items[index]));
 
 			playManager.Enqueue(items.Select(item => item.AudioResource),
-				new MetaData(uid != null ? Uid.To(uid) : invoker.ClientUid, listId)).UnwrapThrow();
+				new MetaData(uid != null ? Uid.To(uid) : invoker.ClientUid, id)).UnwrapThrow();
 
 			if (indices.Count == 1) {
 				return $"Queued '{items[0].AudioResource.ResourceTitle}' from playlist {plist.Title}.";

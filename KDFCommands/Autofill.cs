@@ -151,7 +151,7 @@ namespace KDFCommands {
 						CommandExceptionReason.InternalError);
 
 				var (list, index) = infoOpt.Value;
-				var playlist = PlaylistManager.LoadPlaylist(list.Id).UnwrapThrow();
+				var (playlist, _) = PlaylistManager.LoadPlaylist(list.Id).UnwrapThrow();
 
 				if (playlist.Items.Count != list.SongCount)
 					Log.Warn("Playlist '{0}' is possibly corrupted!", list.Id);
