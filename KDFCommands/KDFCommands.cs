@@ -162,6 +162,132 @@ namespace KDFCommands {
 			}
 		}
 
+		public static HashSet<AudioResource> ListInteresection(IReadOnlyPlaylist listA, IReadOnlyPlaylist listB) {
+			var itemsInB = new HashSet<AudioResource>(listB.Items.Select(i => i.AudioResource));
+			var itemsInA = new HashSet<AudioResource>(listA.Items.Select(i => i.AudioResource));
+			itemsInA.IntersectWith(itemsInB);
+			return itemsInA;
+		}
+
+		public static HashSet<AudioResource> ListDifference(IReadOnlyPlaylist listA, IReadOnlyPlaylist listB) {
+			var itemsInB = new HashSet<AudioResource>(listB.Items.Select(i => i.AudioResource));
+			var itemsInA = new HashSet<AudioResource>(listA.Items.Select(i => i.AudioResource));
+			itemsInA.ExceptWith(itemsInB);
+			return itemsInA;
+		}
+
+		public static void AppendAudioResource(StringBuilder builder, int index, AudioResource item) {
+			builder.Append(index).Append(": ").Append(item.ResourceTitle);
+		}
+
+		public static void AppendItemsIndexed(StringBuilder builder, IEnumerable<AudioResource> items) {
+			var index = 0;
+			foreach (var item in items) {
+				builder.AppendLine();
+				AppendAudioResource(builder, index++, item);
+			}
+		}
+
+		private static void ListRemoveAll(StringBuilder builder,
+			PlaylistManager playlistManager, ExecutionInformation info, string listId, HashSet<AudioResource> items) {
+			MainCommands.ModifyPlaylist(playlistManager, listId, info, playlist => {
+				for (var i = playlist.Items.Count - 1; i >= 0; i--) {
+					var res = playlist.Items[i].AudioResource;
+					if (!items.Contains(res)) 
+						continue;
+					playlist.RemoveAt(i);
+					builder.AppendLine().Append("Removed ");
+					AppendAudioResource(builder, i, res);
+				}
+			}).UnwrapThrow();
+		}
+
+		[Command("list intersect")]
+		public static string CommandListIntersect(PlaylistManager playlistManager, ExecutionInformation info, string listId, string listTo, string[] args = null) {
+			var additionalArgs = args ?? Array.Empty<string>();
+
+			var (listA, aId) = playlistManager.LoadPlaylist(listId).UnwrapThrow();
+			var (listB, bId) = playlistManager.LoadPlaylist(listTo).UnwrapThrow();
+
+			// Return songs in both lists
+			var inBoth = ListInteresection(listA, listB);
+
+			var builder = new StringBuilder();
+			builder.Append($"{inBoth.Count} songs in the intersection of \"{aId}\" and \"{bId}\". ");
+
+			if (!additionalArgs.Contains("--remove")) {
+				builder.Append($"Append --remove to remove them from \"{aId}\".");
+
+				if (inBoth.Count > 0)
+					AppendItemsIndexed(builder, inBoth);
+			} else {
+				builder.Append($"Removed them from \"{aId}\".");
+				ListRemoveAll(builder, playlistManager, info, aId, inBoth);
+			}
+
+			return builder.ToString();
+		}
+
+		[Command("list difference")]
+		public static string CommandListDifference(PlaylistManager playlistManager, ExecutionInformation info, string listId, string listTo, string[] args = null) {
+			var additionalArgs = args ?? Array.Empty<string>();
+
+			var (listA, aId) = playlistManager.LoadPlaylist(listId).UnwrapThrow();
+			var (listB, bId) = playlistManager.LoadPlaylist(listTo).UnwrapThrow();
+
+			var difference = ListDifference(listA, listB);
+
+			var builder = new StringBuilder();
+			builder.Append($"{difference.Count} songs in the difference of \"{aId}\" and \"{bId}\". ");
+
+			if (!additionalArgs.Contains("--remove")) {
+				builder.Append($"Append --remove to remove them from \"{aId}\".");
+
+				if (difference.Count > 0) {
+					AppendItemsIndexed(builder, difference);
+				}
+			} else {
+				builder.Append($"Removed them from \"{aId}\".");
+				ListRemoveAll(builder, playlistManager, info, aId, difference);
+			}
+
+			return builder.ToString();
+		}
+
+		[Command("list sort")]
+		public static string CommandListSort(PlaylistManager playlistManager, ExecutionInformation info, string listId, string[] args = null) {
+			var (listA, aId) = playlistManager.LoadPlaylist(listId).UnwrapThrow();
+			var additionalArgs = args ?? Array.Empty<string>();
+
+			var builder = new StringBuilder();
+			var comparison = additionalArgs.Contains("--ignore-case") ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+			builder.Append($"Playlist \"{aId}\" with {listA.Items.Count} songs sorted alphabetically");
+			if (comparison == StringComparison.OrdinalIgnoreCase)
+				builder.Append(" (ignoring case). ");
+			else
+				builder.Append(". Append --ignore-case to ignore case. ");
+
+			var resources = new List<PlaylistItem>(listA.Items);
+			
+			resources.Sort((a, b) => string.Compare(a.AudioResource.ResourceTitle, b.AudioResource.ResourceTitle, comparison));
+
+			if (!additionalArgs.Contains("--apply")) {
+				builder.Append("Append --apply to permute the songs.");
+				AppendItemsIndexed(builder, resources.Select(i => i.AudioResource));
+			} else {
+				builder.Append("Applied the new sorting.");
+				MainCommands.ModifyPlaylist(playlistManager, aId, info, playlist => {
+					if (playlist.Items.Count != resources.Count)
+						throw new CommandException("Playlist was changed in the meantime!",
+							CommandExceptionReason.CommandError);
+					playlist.Clear();
+					playlist.AddRange(resources);
+				}).UnwrapThrow();
+			}
+
+			return builder.ToString();
+		}
+
 		[Command("list rqueue")]
 		public static string CommandListRQueue(
 			PlaylistManager playlistManager,
