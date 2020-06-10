@@ -254,40 +254,6 @@ namespace KDFCommands {
 			return builder.ToString();
 		}
 
-		[Command("list sort")]
-		public static string CommandListSort(PlaylistManager playlistManager, ExecutionInformation info, string listId, string[] args = null) {
-			var (listA, aId) = playlistManager.LoadPlaylist(listId).UnwrapThrow();
-			var additionalArgs = args ?? Array.Empty<string>();
-
-			var builder = new StringBuilder();
-			var comparison = additionalArgs.Contains("--ignore-case") ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-			builder.Append($"Playlist \"{aId}\" with {listA.Items.Count} songs sorted alphabetically");
-			if (comparison == StringComparison.OrdinalIgnoreCase)
-				builder.Append(" (ignoring case). ");
-			else
-				builder.Append(". Append --ignore-case to ignore case. ");
-
-			var resources = new List<PlaylistItem>(listA.Items);
-			
-			resources.Sort((a, b) => string.Compare(a.AudioResource.ResourceTitle, b.AudioResource.ResourceTitle, comparison));
-
-			if (!additionalArgs.Contains("--apply")) {
-				builder.Append("Append --apply to permute the songs.");
-				AppendItemsIndexed(builder, resources.Select(i => i.AudioResource));
-			} else {
-				builder.Append("Applied the new sorting.");
-				MainCommands.ModifyPlaylist(playlistManager, aId, info, playlist => {
-					if (playlist.Items.Count != resources.Count)
-						throw new CommandException("Playlist was changed in the meantime!",
-							CommandExceptionReason.CommandError);
-					playlist.Clear();
-					playlist.AddRange(resources);
-				}).UnwrapThrow();
-			}
-
-			return builder.ToString();
-		}
-
 		[Command("list rqueue")]
 		public static string CommandListRQueue(
 			PlaylistManager playlistManager,
