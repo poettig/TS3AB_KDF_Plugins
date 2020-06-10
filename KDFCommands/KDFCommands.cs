@@ -1144,10 +1144,10 @@ namespace KDFCommands {
 				new MetaData(uid != null ? Uid.To(uid) : invoker.ClientUid, id)).UnwrapThrow();
 
 			if (indices.Count == 1) {
-				return $"Queued '{items[0].AudioResource.ResourceTitle}' from playlist {plist.Title}.";
+				return $"Queued '{items[0].AudioResource.ResourceTitle}' from playlist {plist.Id}.";
 			}
 
-			return $"Queued {items.Count} items from playlist {plist.Title}.";
+			return $"Queued {items.Count} items from playlist {plist.Id}.";
 		}
 
 		[Command("checkuser online byuid")]
