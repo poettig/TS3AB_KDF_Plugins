@@ -3,9 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using Newtonsoft.Json;
-using NLog.Fluent;
 using TS3AudioBot;
-using TS3AudioBot.Audio;
 using TS3AudioBot.CommandSystem;
 using TS3AudioBot.CommandSystem.Text;
 using TS3AudioBot.Config;
@@ -103,14 +101,12 @@ namespace KDFCommands {
 			public string Command { get; }
 			public Func<string> Executor { get; }
 			public bool RemoveOnResourceEnd { get; }
-			public Uid? SongOwnerUid { get; }
 			public HashSet<Uid> Voters { get; } = new HashSet<Uid>();
 
-			public CurrentVoteData(string command, int clientCount, Func<string> executor, bool removeOnResourceEnd, Uid? songOwnerUid = null) {
+			public CurrentVoteData(string command, Func<string> executor, bool removeOnResourceEnd) {
 				Command = command;
 				Executor = executor;
 				RemoveOnResourceEnd = removeOnResourceEnd;
-				SongOwnerUid = songOwnerUid;
 			}
 		}
 
@@ -211,8 +207,7 @@ namespace KDFCommands {
 
 		private bool CheckAndFire(CurrentVoteData vote) {
 			// Vote is not finished if the needed vote count is not reached
-			// Also, check if none of the voters is the song owner in case of a "removeOnResourceEnd" command
-			if (Needed > vote.Voters.Count && (vote.SongOwnerUid == null || vote.Voters.All(voter => voter != vote.SongOwnerUid))) {
+			if (Needed > vote.Voters.Count) {
 				return false;
 			}
 
@@ -309,13 +304,8 @@ namespace KDFCommands {
 			} else {
 				info.AddModule(CreateCallerInfo());
 				var (executor, removeOnResourceEnd) = votableCommand.Create(info, command, args);
-				
-				Uid? songOwnerUid = null;
-				if (removeOnResourceEnd && info.TryGet<PlayManager>(out var playManager)) {
-					songOwnerUid = playManager.Queue.Current.MetaData.ResourceOwnerUid;
-				}
-				
-				currentVote = new CurrentVoteData(command, Needed, executor, removeOnResourceEnd, songOwnerUid);
+
+				currentVote = new CurrentVoteData(command, executor, removeOnResourceEnd);
 				Add(currentVote);
 				voteAdded = true;
 				currentVote.Voters.Add(invoker);

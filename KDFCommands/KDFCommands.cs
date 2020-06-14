@@ -1167,6 +1167,31 @@ namespace KDFCommands {
 			throw new CommandException("You have to be in the same channel as the bot to use votes.", CommandExceptionReason.CommandError);
 		}
 
+		[Command("skiporvoteskipwithuid")]
+		public JsonValue<Voting.Result> CommandStartVoteWithUid(ExecutionInformation info, string clientUid) {
+			var uid = Uid.To(clientUid);
+
+			var botChannel = ts3FullClient.Book.CurrentChannel().Id;
+			var hasClientWithUidInBotChannel = ClientUtility.GetClientsByUidOnline(ts3FullClient, uid).Any(c => botChannel == c.Channel);
+			if (!hasClientWithUidInBotChannel)
+				ThrowNotInSameChannel();
+			lock (playManager.Lock) {
+				if (playManager.Queue.Current.MetaData.ResourceOwnerUid == uid) {
+					playManager.Next();
+					ts3Client.SendChannelMessage($"{ClientUtility.GetClientNameFromUid(ts3FullClient, uid)} skipped the current song.");
+					return new JsonValue<Voting.Result>(new Voting.Result {
+						VoteAdded = true,
+						VoteComplete = true,
+						VoteCount = 1,
+						VotesChanged = true,
+						VotesNeeded = 1
+					});
+				}
+			}
+			
+			return CommandStartVote(info, uid, "skip", null);
+		}
+
 		[Command("votewithuid")]
 		public JsonValue<Voting.Result> CommandStartVoteWithUid(
 			TsFullClient ts3FullClient, ExecutionInformation info,
