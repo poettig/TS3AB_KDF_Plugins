@@ -1176,7 +1176,8 @@ namespace KDFCommands {
 			if (!hasClientWithUidInBotChannel)
 				ThrowNotInSameChannel();
 			lock (playManager.Lock) {
-				if (playManager.Queue.Current.MetaData.ResourceOwnerUid == uid) {
+				var current = playManager.Queue.Current;
+				if (current != null && current.MetaData.ResourceOwnerUid == uid) {
 					playManager.Next();
 					ts3Client.SendChannelMessage($"{ClientUtility.GetClientNameFromUid(ts3FullClient, uid)} skipped the current song.");
 					return new JsonValue<Voting.Result>(new Voting.Result {
