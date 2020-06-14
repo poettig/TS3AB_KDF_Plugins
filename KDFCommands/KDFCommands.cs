@@ -73,11 +73,13 @@ namespace KDFCommands {
 		private readonly TsFullClient ts3FullClient;
 		private readonly Ts3Client ts3Client;
 
-		private readonly ConfBot config;
+		private readonly ConfBot confBot;
+		private readonly ConfPlugins confPlugins;
 
 		private Voting Voting { get; set; }
 		private Autofill Autofill { get; set; }
 		private Description Description { get; set; }
+		private TwitchInfoUpdater TwitchInfoUpdater { get; set; }
 
 		private ChannelUserList BotChannelUserList { get; set; }
 
@@ -90,7 +92,8 @@ namespace KDFCommands {
 			Ts3Client ts3Client,
 			TsFullClient ts3FullClient,
 			CommandManager commandManager,
-			ConfBot config, 
+			ConfBot confBot,
+			ConfPlugins confPlugins,
 			Bot bot) {
 			this.player = player;
 			this.playManager = playManager;
@@ -99,10 +102,10 @@ namespace KDFCommands {
 			this.ts3FullClient = ts3FullClient;
 			bot.RegenerateStatusImage();
 			this.ts3Client = ts3Client;
-			this.config = config;
+			this.confBot = confBot;
+			this.confPlugins = confPlugins;
 
 			commandManager.RegisterCollection(Bag);
-			
 		}
 
 		public void Initialize() {
@@ -110,7 +113,7 @@ namespace KDFCommands {
 			playManager.PlaybackStopped += PlaybackStopped;
 			playManager.ResourceStopped += OnResourceStopped;
 
-			Voting = new Voting(ts3Client, ts3FullClient, config);
+			Voting = new Voting(ts3Client, ts3FullClient, confBot);
 			Autofill = new Autofill(ts3Client, playManager, playlistManager, ts3FullClient);
 			Description = new Description(player, ts3Client, playManager);
 		}
@@ -135,11 +138,25 @@ namespace KDFCommands {
 			Voting.CancelAll();
 		}
 
-		private void OnResourceStopped(object sender, SongEndEventArgs e) { Voting.OnSongEnd(); }
+		private void OnResourceStopped(object sender, SongEndEventArgs e) {
+			Voting.OnSongEnd();
+			if (TwitchInfoUpdater != null) {
+				TwitchInfoUpdater.Dispose();
+				TwitchInfoUpdater = null;
+			}
+		}
 
 		private void ResourceStarted(object sender, PlayInfoEventArgs e) {
 			using (System.IO.StreamWriter statfile = new System.IO.StreamWriter("stats_play.txt", true)) {
 				statfile.WriteLine(DateTimeOffset.UtcNow.ToUnixTimeSeconds() + ":::" + e.ResourceData.ResourceTitle + ":::" + e.ResourceData.ResourceId + ":::" + e.PlayResource.Meta.ContainingPlaylistId + ":::" + e.PlayResource.Meta.ResourceOwnerUid);
+			}
+
+			if (e.PlayResource.BaseData.AudioType == "twitch") {
+				// Start twitch info collector
+				TwitchInfoUpdater = new TwitchInfoUpdater(confPlugins, e.PlayResource.BaseData.ResourceId);					
+			} else if (TwitchInfoUpdater != null) {
+				TwitchInfoUpdater.Dispose();
+				TwitchInfoUpdater = null;
 			}
 			
 			var owner = e.PlayResource.Meta.ResourceOwnerUid;
@@ -1110,10 +1127,10 @@ namespace KDFCommands {
 				new MetaData(uid != null ? Uid.To(uid) : invoker.ClientUid, id)).UnwrapThrow();
 
 			if (indices.Count == 1) {
-				return $"Queued '{items[0].AudioResource.ResourceTitle}' from playlist {plist.Id}.";
+				return $"Queued '{items[0].AudioResource.ResourceTitle}' from playlist {id}.";
 			}
 
-			return $"Queued {items.Count} items from playlist {plist.Id}.";
+			return $"Queued {items.Count} items from playlist {id}.";
 		}
 
 		[Command("checkuser online byuid")]
@@ -1178,6 +1195,81 @@ namespace KDFCommands {
 		private JsonValue<Voting.Result> CommandStartVote(ExecutionInformation info, Uid client, string command, string args) {
 			var res = Voting.CommandVote(info, client, command, args);
 			return new JsonValue<Voting.Result>(res, r => null);
+		}
+
+		[Command("twitchinfo")]
+		public JsonValue<TwitchInfo> CommandTwitchInfo() {
+			if (TwitchInfoUpdater == null) {
+				throw new CommandException("No twitch stream currently running.", CommandExceptionReason.MissingContext);
+			}
+
+			if (playManager == null) {
+				throw new CommandException("Missing playManager for some reason.", CommandExceptionReason.MissingContext);
+			}
+			if (playManager.CurrentPlayData == null) {
+				throw new CommandException("Missing CurrentPlayData for some reason.", CommandExceptionReason.MissingContext);
+			}
+			if (playManager.CurrentPlayData.MetaData == null) {
+				throw new CommandException("Missing MetaData for some reason.", CommandExceptionReason.MissingContext);
+			}
+
+			string issuerName = null;
+			var issuerUid = playManager.CurrentPlayData.MetaData.ResourceOwnerUid;
+			if (issuerUid != null) {
+				issuerName = ClientUtility.GetClientNameFromUid(ts3FullClient, issuerUid.Value);
+			}
+
+			var streamInfo = TwitchInfoUpdater.StreamInfo.Data[0];
+			var streamerInfo = TwitchInfoUpdater.StreamerInfo.Data[0];
+
+			if (streamInfo == null) {
+				throw new CommandException("Missing StreamInfo for some reason.", CommandExceptionReason.MissingContext);
+			}
+			
+			if (streamerInfo == null) {
+				throw new CommandException("Missing StreamerInfo for some reason.", CommandExceptionReason.MissingContext);
+			}
+			
+			return JsonValue.Create<TwitchInfo>(new TwitchInfo {
+				ViewerCount = streamInfo.ViewerCount,
+				Uptime = DateTimeOffset.UtcNow.ToUnixTimeSeconds() - streamInfo.StartedAt.ToUnix(),
+				ThumbnailUrl = streamInfo.ThumbnailUrl,
+				AvatarUrl = streamerInfo.ProfileImageUrl.ToString(),
+				StreamerName = streamerInfo.DisplayName,
+				StreamerLogin = streamerInfo.Login,
+				StreamTitle = streamInfo.Title,
+				IssuerUid = issuerUid.ToString(),
+				IssuerName = issuerName,
+			}, info => "[" + info.IssuerName + " " + info.Uptime + "] - " + info.StreamTitle + " (" + info.ViewerCount + " viewers) - https://twitch.tv/" + info.StreamerLogin);
+		}
+
+		public class TwitchInfo {
+			[JsonProperty("ViewerCount")]
+			public long ViewerCount { get; set; }
+			
+			[JsonProperty("Uptime")]
+			public long Uptime { get; set; }
+
+			[JsonProperty("ThumbnailUrl")]
+			public string ThumbnailUrl { get; set; }
+			
+			[JsonProperty("AvatarUrl")]
+			public string AvatarUrl { get; set; }
+
+			[JsonProperty("StreamerName")]
+			public string StreamerName { get; set; }
+			
+			[JsonProperty("StreamerLogin")]
+			public string StreamerLogin { get; set; }
+
+			[JsonProperty("StreamTitle")]
+			public string StreamTitle { get; set; }
+			
+			[JsonProperty("IssuerUid")]
+			public string IssuerUid { get; set; }
+			
+			[JsonProperty("IssuerName")]
+			public string IssuerName { get; set; }
 		}
 	}
 }

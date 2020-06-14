@@ -1,0 +1,5 @@
+{
+    "ClientId": "<Twitch-API-Client-ID>",
+    "ClientSecret": "<Twitch-API-Client-Secret>",
+    "_ClientSecret_Comment": "SECURE THIS FILE WITH PROPER PERMISSIONS, THE CLIENT SECRET HAS TO STAY SECRET!"
+}
