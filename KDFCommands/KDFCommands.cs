@@ -828,6 +828,8 @@ namespace KDFCommands {
 						failed.Add((index - currentSongIndex, item.AudioResource.ResourceTitle));
 					}
 				}
+
+				playManager.OnQueueChanged();
 			}
 
 			succeeded.Reverse();
