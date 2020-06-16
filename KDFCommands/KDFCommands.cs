@@ -1144,10 +1144,12 @@ namespace KDFCommands {
 		public string CommandAutofillStatus() { return Autofill.Status("currently"); }
 
 		[Command("autofilloff")]
-		private void CommandAutofillOff(InvokerData invoker) { Autofill.Disable(invoker.ClientUid); }
+		public void CommandAutofillOff(InvokerData invoker) {
+			Autofill.Disable(invoker.ClientUid);
+		}
 
 		[Command("autofilloffwithuid")]
-		private void CommandAutofillOffWithUid(string uidStr) {
+		public void CommandAutofillOffWithUid(string uidStr) {
 			var uid = Uid.To(uidStr);
 			ClientUtility.CheckOnlineThrow(ts3FullClient, uid);
 			Autofill.Disable(uid);
