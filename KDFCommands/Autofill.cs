@@ -68,45 +68,59 @@ namespace KDFCommands {
 
 		public void Disable() { AutofillData = null; }
 
+		public void DisableAndRemoveShadow() {
+			if (AutofillData.Next == PlayManager.NextSongShadow)
+				PlayManager.NextSongShadow = null;
+			Disable();
+		}
+
 		private bool playbackStoppedReentrantGuard = false;
 
-		public void OnPlaybackStopped() {
+		public void OnPlaybackStopped(PlaybackStoppedEventArgs eventArgs) {
 			if (playbackStoppedReentrantGuard)
 				return;
 			playbackStoppedReentrantGuard = true;
 
 			// Enqueue fires playback stopped event if the song failed to play
-			UpdateAutofillOnPlaybackStopped();
+			UpdateAutofillOnPlaybackStopped(eventArgs);
 
 			playbackStoppedReentrantGuard = false;
 		}
 
 		public void Disable(Uid uid) {
 			// Explicitly requested to turn it off
-			Disable();
+			DisableAndRemoveShadow();
 			Ts3Client.SendChannelMessage("[" + ClientUtility.GetClientNameFromUid(Ts3FullClient, uid) + "] " +
 			                             Status("now"));
 		}
 
-		private void UpdateAutofillOnPlaybackStopped() {
-			if (PlayManager.Queue.Items.Count != PlayManager.Queue.Index || !AutofillEnabled) {
+		private bool CheckPreconditions() {
+			return PlayManager.Queue.Items.Count == PlayManager.Queue.Index && // at end of queue
+			       AutofillEnabled && // enabled
+			       !PlayManager.IsPlaying && // not playing
+			       !Ts3Client.IsDefinitelyAlone(); // not alone
+		}
+
+		private void UpdateAutofillOnPlaybackStopped(PlaybackStoppedEventArgs eventArgs) {
+			if (!CheckPreconditions()) {
+				if (AutofillData != null && AutofillData.Next == eventArgs.NextShadow)
+					eventArgs.NextShadow = null;
+				Disable();
 				return;
 			}
 
-			for (var i = 0; i < 10; i++) {
-				if (Ts3Client.IsDefinitelyAlone()) {
-					Disable();
-					return;
-				}
+			var (item, next) = DoAutofill();
+			eventArgs.Item = item;
+			eventArgs.NextShadow = next;
+		}
 
-				var result = PlayRandom();
-				if (result.Ok) {
-					return;
-				}
-			}
-
-			Ts3Client.SendChannelMessage("Could not play a new autofill song after 10 tries. Disabling autofill.");
-			Disable();
+		private (QueueItem item, QueueItem next) DoAutofill() {
+			var item = AutofillData.Next;
+			Log.Info("Autofilling the song '{0}' from playlist '{1}'.", item.AudioResource.ResourceTitle,
+				item.MetaData.ContainingPlaylistId);
+			DrawNextSong();
+			var next = AutofillData.Next;
+			return (item, next);
 		}
 
 		private static R<(PlaylistInfo list, int offset)> FindSong(int index, IEnumerable<PlaylistInfo> playlists) {
@@ -199,7 +213,6 @@ namespace KDFCommands {
 
 		private void DrawNextSong() {
 			AutofillData.Next = DrawRandom();
-			PlayManager.PrepareNextSong(AutofillData.Next);
 		}
 
 		private E<LocalStr> PlayRandom() {
@@ -242,7 +255,7 @@ namespace KDFCommands {
 						DrawNextSong();
 					} else {
 						// Else, disable autofill
-						Disable();
+						DisableAndRemoveShadow();
 					}
 				} else {
 					// Currently enabled with a selected set of playlists
@@ -271,29 +284,12 @@ namespace KDFCommands {
 				AutofillData.Next = DrawRandom();
 			}
 
-			// Only play a song if there is currently none playing
-			if (AutofillEnabled && !PlayManager.IsPlaying) {
-				bool found = false;
-				for (var i = 0; i < 10; i++) {
-					var result = PlayRandom();
-					if (result.Ok) {
-						found = true;
-						break;
-					}
-
-					if (!AutofillEnabled)
-						break;
-				}
-
-				if (!found) {
-					// Could not successfully play a song after 10 tries
-					Ts3Client.SendChannelMessage(
-						"Could not play a new autofill song after 10 tries. Disabling autofill.");
-					Disable();
-					return;
-				}
+			if (CheckPreconditions()) {
+				var (item, next) = DoAutofill();
+				PlayManager.Enqueue(item);
+				PlayManager.NextSongShadow = next;
 			}
-
+			
 			Ts3Client.SendChannelMessage("[" + ClientUtility.GetClientNameFromUid(Ts3FullClient, uid) + "] " +
 			                             Status("now"));
 		}

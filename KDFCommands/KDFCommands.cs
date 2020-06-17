@@ -133,7 +133,7 @@ namespace KDFCommands {
 			playManager.ResourceStopped -= OnResourceStopped;
 
 			Description.Dispose();
-			Autofill.Disable();
+			Autofill.DisableAndRemoveShadow();
 
 			Voting.CancelAll();
 		}
@@ -166,7 +166,7 @@ namespace KDFCommands {
 				owner.HasValue ? ClientUtility.GetClientNameFromUid(ts3FullClient, owner.Value) : null);
 		}
 
-		private void PlaybackStopped(object sender, EventArgs eventArgs) { Autofill.OnPlaybackStopped(); }
+		private void PlaybackStopped(object sender, PlaybackStoppedEventArgs eventArgs) { Autofill.OnPlaybackStopped(eventArgs); }
 
 		private static void Shuffle<T>(IList<T> list, Random rng) {
 			int n = list.Count;
