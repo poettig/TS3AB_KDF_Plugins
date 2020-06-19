@@ -69,7 +69,7 @@ namespace KDFCommands {
 		public void Disable() { AutofillData = null; }
 
 		public void DisableAndRemoveShadow() {
-			if (AutofillData.Next == PlayManager.NextSongShadow)
+			if (AutofillData != null && AutofillData.Next == PlayManager.NextSongShadow)
 				PlayManager.NextSongShadow = null;
 			Disable();
 		}
