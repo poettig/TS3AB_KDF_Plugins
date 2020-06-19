@@ -1141,7 +1141,7 @@ namespace KDFCommands {
 		}
 
 		[Command("autofillstatus")]
-		public string CommandAutofillStatus() { return Autofill.Status("currently"); }
+		public string CommandAutofillStatus() { return Autofill.Status(); }
 
 		[Command("autofilloff")]
 		public void CommandAutofillOff(InvokerData invoker) {

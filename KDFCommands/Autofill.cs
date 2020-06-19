@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using TS3AudioBot;
 using TS3AudioBot.Audio;
 using TS3AudioBot.CommandSystem;
@@ -45,14 +46,24 @@ namespace KDFCommands {
 			Ts3FullClient = ts3FullClient;
 		}
 
-		public string Status(string word) {
-			string result = "Autofill is " + word + " ";
+		public string Status(string word = "") {
+			string result = "Autofill is";
+			result += word != "" ? " " + word + " " : " ";
 
 			if (AutofillEnabled) {
 				result += "enabled";
 
 				if (AutofillData.Playlists != null) {
-					result += " using the playlists " + string.Join(", ", AutofillData.Playlists) + ".";
+					result += " using the playlist";
+					
+					var playlists = AutofillData.Playlists.ToList();
+					if (playlists.Count == 1) {
+						result += " " + playlists[0] + ".";
+					} else {
+						result += "s ";
+						result += string.Join(", ", playlists.Take(playlists.Count - 1));
+						result += " and " + playlists[^1] + ".";
+					}
 				} else {
 					result += " using all playlists.";
 				}
