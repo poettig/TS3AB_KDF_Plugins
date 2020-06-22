@@ -18,6 +18,7 @@ using TS3AudioBot.Plugins;
 using TS3AudioBot.Playlists;
 using TS3AudioBot.ResourceFactories;
 using TS3AudioBot.Helper;
+using TS3AudioBot.Localization;
 using TS3AudioBot.Sessions;
 using TS3AudioBot.Web.Api;
 using TSLib;
@@ -435,6 +436,10 @@ namespace KDFCommands {
 			ClientUtility.SendMessage(ts3Client, cc, ComposeAddMessage(playManager)); // This will fail if async
 		}
 
+		private static void SendAddFailure(Ts3Client ts3Client, string query, LocalStr error, ClientCall client) {
+			ClientUtility.SendMessage(ts3Client, client, "Error occured for + '" + query + "': " + error);
+		}
+
 		private static string AddUrl(
 			PlaylistManager playlistManager,
 			PlayManager playManager,
@@ -459,8 +464,11 @@ namespace KDFCommands {
 				);
 			}
 
-			if (playManager.Enqueue(url, new MetaData(uid)).UnwrapSendMessage(ts3Client, cc, url)) {
+			var res = playManager.Enqueue(url, new MetaData(uid));
+			if (res.Ok) {
 				PrintAddMessage(ts3Client, cc, playManager);
+			} else {
+				SendAddFailure(ts3Client, url, res.Error, cc);
 			}
 
 			// Only reached of not silent.
@@ -491,12 +499,12 @@ namespace KDFCommands {
 					);
 				}
 
-				result = resolver.Search("youtube", query).UnwrapSendMessage(ts3Client, cc, query);
-			}
-
-			// Will not be reached if silent is marked and the search failed because of UnwrapThrow()
-			if (result == null) {
-				return null;
+				var r = resolver.Search("youtube", query);
+				if (!r.Ok) {
+					SendAddFailure(ts3Client, query, r.Error, cc);
+					return null;
+				}
+				result = r.Value;
 			}
 
 			AudioResource audioResource = result[0];
@@ -505,8 +513,11 @@ namespace KDFCommands {
 				return ComposeAddMessage(playManager);
 			}
 
-			if (playManager.Enqueue(audioResource, new MetaData(uid)).UnwrapSendMessage(ts3Client, cc, query)) {
+			var res = playManager.Enqueue(audioResource, new MetaData(uid));
+			if (res.Ok) {
 				PrintAddMessage(ts3Client, cc, playManager);
+			} else {
+				SendAddFailure(ts3Client, query, res.Error, cc);
 			}
 
 			// Only reached if not silent
@@ -695,13 +706,13 @@ namespace KDFCommands {
 			string target = null,
 			bool silent = false) {
 
-			var result = resolver.Search("youtube", query).UnwrapSendMessage(ts3Client, cc, query);
-
-			if (result == null) {
+			var result = resolver.Search("youtube", query);
+			if (!result.Ok) {
+				SendAddFailure(ts3Client, query, result.Error, cc);
 				return null;
 			}
 
-			AudioResource audioResource = result[0];
+			AudioResource audioResource = result.Value[0];
 			int index;
 			try {
 				(_, index) = MainCommands.ListAddItem(playlistManager, info, target, audioResource);

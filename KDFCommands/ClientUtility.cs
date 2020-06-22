@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using TS3AudioBot;
 using TS3AudioBot.CommandSystem;
+using TS3AudioBot.Localization;
 using TSLib;
 using TSLib.Full;
 using TSLib.Full.Book;
@@ -35,10 +36,11 @@ namespace KDFCommands {
 		}
 
 		public static void SendMessage(Ts3Client client, ClientCall cc, string message) {
-			if(cc.ClientId.HasValue)
-				client.SendMessage(message, cc.ClientId.Value);
+			if (cc == null || !cc.ClientId.HasValue)
+				return;
+			client.SendMessage(message, cc.ClientId.Value);
 		}
-	
+
 		public static void CheckOnlineThrow(TsFullClient ts3FullClient, Uid uidStr) {
 			if (!ClientIsOnline(ts3FullClient, uidStr)) {
 				throw new CommandException(
