@@ -55,15 +55,14 @@ namespace KDFCommands {
 			PlaylistManager playlistManager,
 			PlayManager playManager,
 			ExecutionInformation info,
-			InvokerData invoker,
+			Uid uid,
 			ResolveContext resolver,
 			ClientCall cc,
 			Ts3Client ts3Client,
 			TsFullClient tsFullClient,
 			string query,
 			string target = null,
-			bool silent = false,
-			string uidStr = null
+			bool silent = false
 		);
 
 		private readonly Player player;
@@ -378,19 +377,19 @@ namespace KDFCommands {
 			PlaylistManager playlistManager,
 			ExecutionInformation execInfo,
 			ResolveContext resolver,
-			InvokerData invoker,
 			Ts3Client ts3Client,
 			TsFullClient ts3FullClient,
 			string uidStr,
 			string message) {
-
+			Uid uid = Uid.To(uidStr);
+			
 			string query = message.Replace("[URL]", "").Replace("[/URL]", "").Trim(' ');
 			if (Regex.Match(query, YOUTUBE_URL_REGEX).Success) {
-				return AddUrl(playlistManager, playManager, execInfo, invoker, resolver, null, ts3Client, ts3FullClient,
-					query, silent: true, uidStr: uidStr);
+				return AddUrl(playlistManager, playManager, execInfo, uid, resolver, null, ts3Client, ts3FullClient,
+					query, silent: true);
 			} else {
-				return AddQuery(playlistManager, playManager, execInfo, invoker, resolver, null, ts3Client,
-					ts3FullClient, query, silent: true, uidStr: uidStr);
+				return AddQuery(playlistManager, playManager, execInfo, uid, resolver, null, ts3Client,
+					ts3FullClient, query, silent: true);
 			}
 		}
 
@@ -416,10 +415,10 @@ namespace KDFCommands {
 				// Check if URL
 				string query = part.Replace("[URL]", "").Replace("[/URL]", "").Trim(' ');
 				if (Regex.Match(query, YOUTUBE_URL_REGEX).Success) {
-					ifUrl(playlistManager, playManager, execInfo, invoker, resolver, cc, ts3Client, ts3FullClient,
+					ifUrl(playlistManager, playManager, execInfo, invoker.ClientUid, resolver, cc, ts3Client, ts3FullClient,
 						query, target);
 				} else {
-					ifQuery(playlistManager, playManager, execInfo, invoker, resolver, cc, ts3Client, ts3FullClient,
+					ifQuery(playlistManager, playManager, execInfo, invoker.ClientUid, resolver, cc, ts3Client, ts3FullClient,
 						query, target);
 				}
 			}
@@ -436,32 +435,18 @@ namespace KDFCommands {
 			ClientUtility.SendMessage(ts3Client, cc, ComposeAddMessage(playManager)); // This will fail if async
 		}
 
-		private static Uid GetRelevantUid(TsFullClient ts3FullClient, InvokerData invoker, string uidStr) {
-			if (uidStr != null) {
-				var uid = Uid.To(uidStr);
-				ClientUtility.CheckOnlineThrow(ts3FullClient, uid);
-				return uid;
-			} else {
-				return invoker.ClientUid;
-			}
-		}
-
 		private static string AddUrl(
 			PlaylistManager playlistManager,
 			PlayManager playManager,
 			ExecutionInformation info,
-			InvokerData invoker,
+			Uid uid,
 			ResolveContext resolver,
 			ClientCall cc,
 			Ts3Client ts3Client,
 			TsFullClient ts3FullClient,
 			string url,
 			string target = null,
-			bool silent = false,
-			string uidStr = null) {
-
-			Uid uid = GetRelevantUid(ts3FullClient, invoker, uidStr);
-
+			bool silent = false) {
 			if (silent) {
 				playManager.Enqueue(url, new MetaData(uid)).UnwrapThrow();
 				return ComposeAddMessage(playManager);
@@ -486,17 +471,14 @@ namespace KDFCommands {
 			PlaylistManager playlistManager,
 			PlayManager playManager,
 			ExecutionInformation info,
-			InvokerData invoker,
+			Uid uid,
 			ResolveContext resolver,
 			ClientCall cc,
 			Ts3Client ts3Client,
 			TsFullClient ts3FullClient,
 			string query,
 			string target = null,
-			bool silent = false,
-			string uidStr = null) {
-
-			Uid uid = GetRelevantUid(ts3FullClient, invoker, uidStr);
+			bool silent = false) {
 
 			IList<AudioResource> result = null;
 			if (silent) {
@@ -625,7 +607,7 @@ namespace KDFCommands {
 						playlistManager,
 						playManager,
 						info,
-						invoker,
+						invoker.ClientUid,
 						resolver,
 						cc,
 						ts3Client,
@@ -671,15 +653,14 @@ namespace KDFCommands {
 			PlaylistManager playlistManager,
 			PlayManager playManager,
 			ExecutionInformation info,
-			InvokerData invoker,
+			Uid uid,
 			ResolveContext resolver,
 			ClientCall cc,
 			Ts3Client ts3Client,
 			TsFullClient ts3FullClient,
 			string url,
 			string target = null,
-			bool silent = false,
-			string uidStr = null) {
+			bool silent = false) {
 
 			int index;
 			string title;
@@ -705,15 +686,14 @@ namespace KDFCommands {
 			PlaylistManager playlistManager,
 			PlayManager playManager,
 			ExecutionInformation info,
-			InvokerData invoker,
+			Uid uid,
 			ResolveContext resolver,
 			ClientCall cc,
 			Ts3Client ts3Client,
 			TsFullClient ts3FullClient,
 			string query,
 			string target = null,
-			bool silent = false,
-			string uidStr = null) {
+			bool silent = false) {
 
 			var result = resolver.Search("youtube", query).UnwrapSendMessage(ts3Client, cc, query);
 
@@ -1151,7 +1131,6 @@ namespace KDFCommands {
 		[Command("autofilloffwithuid")]
 		public void CommandAutofillOffWithUid(string uidStr) {
 			var uid = Uid.To(uidStr);
-			ClientUtility.CheckOnlineThrow(ts3FullClient, uid);
 			Autofill.Disable(uid);
 		}
 
@@ -1163,7 +1142,6 @@ namespace KDFCommands {
 		[Command("autofillwithuid")]
 		public void CommandAutofillWithUid(string uidStr, string[] playlistIds = null) {
 			var uid = Uid.To(uidStr);
-			ClientUtility.CheckOnlineThrow(ts3FullClient, uid);
 			Autofill.CommandAutofill(uid, playlistIds);
 		}
 
@@ -1175,10 +1153,6 @@ namespace KDFCommands {
 		public JsonValue<Voting.Result> CommandStartVoteWithUid(ExecutionInformation info, string clientUid) {
 			var uid = Uid.To(clientUid);
 
-			var botChannel = ts3FullClient.Book.CurrentChannel().Id;
-			var hasClientWithUidInBotChannel = ClientUtility.GetClientsByUidOnline(ts3FullClient, uid).Any(c => botChannel == c.Channel);
-			if (!hasClientWithUidInBotChannel)
-				ThrowNotInSameChannel();
 			lock (playManager.Lock) {
 				var current = playManager.Queue.Current;
 				if (current != null && current.MetaData.ResourceOwnerUid == uid) {
@@ -1194,12 +1168,12 @@ namespace KDFCommands {
 				}
 			}
 			
-			return CommandStartVote(info, uid, "skip", null);
+			return CommandStartVoteWithUid(info, uid.Value, "skip", null);
 		}
 
 		[Command("votewithuid")]
 		public JsonValue<Voting.Result> CommandStartVoteWithUid(
-			TsFullClient ts3FullClient, ExecutionInformation info,
+			ExecutionInformation info,
 			string clientUid, string command, string? args = null) {
 			var uid = Uid.To(clientUid);
 
