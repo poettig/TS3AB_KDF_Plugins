@@ -23,9 +23,7 @@ using TS3AudioBot.Sessions;
 using TS3AudioBot.Web.Api;
 using TSLib;
 using TSLib.Full;
-using TSLib.Full.Book;
 using TSLib.Helper;
-using TSLib.Messages;
 
 namespace KDFCommands {
 	public class KDFCommandsPlugin : IBotPlugin {
@@ -81,10 +79,6 @@ namespace KDFCommands {
 		private Description Description { get; set; }
 		private TwitchInfoUpdater TwitchInfoUpdater { get; set; }
 
-		private ChannelUserList BotChannelUserList { get; set; }
-
-		private ClientId BotId => ts3FullClient.ClientId;
-
 		public KDFCommandsPlugin(
 			Player player,
 			PlayManager playManager,
@@ -116,15 +110,6 @@ namespace KDFCommands {
 			Voting = new Voting(ts3Client, ts3FullClient, confBot);
 			Autofill = new Autofill(ts3Client, playManager, playlistManager, ts3FullClient);
 			Description = new Description(player, ts3Client, playManager);
-		}
-
-		private void OnBotChannelChanged(object sender, ChannelUserListChangedEventArgs e) {
-			if(e.NewChannel) {
-				Log.Info("Bot switched channel, stopping votes");
-				Voting.CancelAll();
-			}
-
-			Voting.OnBotChannelChanged();
 		}
 
 		public void Dispose() {
@@ -488,7 +473,7 @@ namespace KDFCommands {
 			string target = null,
 			bool silent = false) {
 
-			IList<AudioResource> result = null;
+			IList<AudioResource> result;
 			if (silent) {
 				result = resolver.Search("youtube", query).UnwrapThrow();
 			} else {
@@ -940,7 +925,7 @@ namespace KDFCommands {
 
 		[Command("recentlyplayed")]
 		public JsonArray<QueueItemInfo> CommandRecentlyPlayed(
-			PlayManager playManager, ExecutionInformation info, InvokerData invoker, int? count) {
+			PlayManager playManager, int? count) {
 			List<QueueItemInfo> items;
 			lock (playManager) {
 				int start = Math.Max(0, playManager.Queue.Index - count ?? 5);
@@ -1221,17 +1206,25 @@ namespace KDFCommands {
 			if (playManager == null) {
 				throw new CommandException("Missing playManager for some reason.", CommandExceptionReason.MissingContext);
 			}
-			if (playManager.CurrentPlayData == null) {
-				throw new CommandException("Missing CurrentPlayData for some reason.", CommandExceptionReason.MissingContext);
-			}
-			if (playManager.CurrentPlayData.MetaData == null) {
-				throw new CommandException("Missing MetaData for some reason.", CommandExceptionReason.MissingContext);
-			}
 
-			string issuerName = null;
-			var issuerUid = playManager.CurrentPlayData.MetaData.ResourceOwnerUid;
-			if (issuerUid != null) {
-				issuerName = ClientUtility.GetClientNameFromUid(ts3FullClient, issuerUid.Value);
+			string issuerName;
+			Uid? issuerUid;
+			lock (playManager) {
+				if (playManager.CurrentPlayData == null) {
+					throw new CommandException("Missing CurrentPlayData for some reason.",
+						CommandExceptionReason.MissingContext);
+				}
+
+				if (playManager.CurrentPlayData.MetaData == null) {
+					throw new CommandException("Missing MetaData for some reason.",
+						CommandExceptionReason.MissingContext);
+				}
+
+				issuerName = null;
+				issuerUid = playManager.CurrentPlayData.MetaData.ResourceOwnerUid;
+				if (issuerUid != null) {
+					issuerName = ClientUtility.GetClientNameFromUid(ts3FullClient, issuerUid.Value);
+				}
 			}
 
 			var streamInfo = TwitchInfoUpdater.StreamInfo.Data[0];

@@ -1,13 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using TS3AudioBot;
 using TS3AudioBot.CommandSystem;
-using TS3AudioBot.Localization;
 using TSLib;
 using TSLib.Full;
 using TSLib.Full.Book;
-using TSLib.Messages;
 
 namespace KDFCommands {
 	public static class ClientUtility {
