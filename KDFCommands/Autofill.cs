@@ -77,11 +77,17 @@ namespace KDFCommands {
 			return result;
 		}
 
-		public void Disable() { AutofillData = null; }
+		public void Disable() {
+			Log.Trace("Autofill: Disabled.");
+			AutofillData = null;
+		}
 
 		public void DisableAndRemoveShadow() {
-			if (AutofillData != null && AutofillData.Next == PlayManager.NextSongShadow)
+			if (AutofillData != null && AutofillData.Next == PlayManager.NextSongShadow) {
 				PlayManager.NextSongShadow = null;
+				Log.Trace("Autofill: Removed existing shadow.");
+			}
+
 			Disable();
 		}
 
@@ -105,20 +111,41 @@ namespace KDFCommands {
 			                             Status("now"));
 		}
 
-		private bool CheckPreconditions() {
-			return PlayManager.Queue.Items.Count == PlayManager.Queue.Index && // at end of queue
-			       AutofillEnabled && // enabled
-			       !PlayManager.IsPlaying && // not playing
-			       !Ts3Client.IsDefinitelyAlone(); // not alone
+		private bool ShouldStayActive() {
+			return !Ts3Client.IsDefinitelyAlone(); // not alone
+		}
+
+		private bool ShouldFillSong() {
+			var b = AutofillEnabled && // enabled
+			        PlayManager.Queue.Items.Count == PlayManager.Queue.Index && // at end of queue
+			        !PlayManager.IsPlaying; // not playing
+			       
+			if (!b) {
+				string reason;
+				if (!AutofillEnabled)
+					reason = "Not enabled";
+				else if (PlayManager.Queue.Items.Count != PlayManager.Queue.Index)
+					reason = "Not at end of queue";
+				else
+					reason = "Play manager is playing";
+
+				Log.Trace($"Autofill: ShouldFillSong returned false, first reason: {reason}");
+			}
+
+			return b;
 		}
 
 		private void UpdateAutofillOnPlaybackStopped(PlaybackStoppedEventArgs eventArgs) {
-			if (!CheckPreconditions()) {
-				if (AutofillData != null && AutofillData.Next == eventArgs.NextShadow)
-					eventArgs.NextShadow = null;
-				Disable();
+			if (!AutofillEnabled)
+				return;
+
+			if (!ShouldStayActive()) {
+				DisableAndRemoveShadow();
 				return;
 			}
+
+			if (!ShouldFillSong())
+				return;
 
 			var (item, next) = DoAutofill();
 			eventArgs.Item = item;
@@ -144,7 +171,7 @@ namespace KDFCommands {
 			return R.Err;
 		}
 
-		private QueueItem DrawRandom() {
+		private (QueueItem item, int offset) DrawRandom() {
 			// Play random song from a random playlist currently in the selected set
 			
 			// Get total number of songs from all selected playlists
@@ -159,8 +186,6 @@ namespace KDFCommands {
 				playlists.Add(playlist);
 				numSongs += playlist.SongCount;
 			}
-
-			Log.Debug("Found {0} songs across {1} playlists.", numSongs, playlists.Count);
 
 			var sIdx = 0;
 			string plId = null;
@@ -184,8 +209,6 @@ namespace KDFCommands {
 				sIdx = index;
 				plId = list.Id;
 				resource = playlist.Items[index].AudioResource;
-				Log.Info("Found song index {0}: Song '{1}' in playlist '{2}' at index {3}.", songIndex,
-					resource.ResourceTitle, list.Id, index);
 
 				// Check if the song was already played in the last 250 songs, if not take this one.
 				// If items.count < 250, the subtraction is negative, meaning that j == 0 will be reached first
@@ -197,7 +220,7 @@ namespace KDFCommands {
 							continue;
 						}
 
-						Log.Info("The song {0} was already played {1} songs ago. Searching another one...",
+						Log.Trace("The song {0} was already played {1} songs ago. Searching another one...",
 							items[j].AudioResource.ResourceTitle, items.Count - j - 1);
 						foundDuplicate = true;
 						break;
@@ -219,27 +242,13 @@ namespace KDFCommands {
 			using (System.IO.StreamWriter statfile = new System.IO.StreamWriter("stats_autofill.txt", true)) {
 				statfile.WriteLine(DateTimeOffset.UtcNow.ToUnixTimeSeconds() + ":::" + resource.ResourceTitle + ":::" + resource.ResourceId);
 			}
-			return new QueueItem(resource, new MetaData(Ts3FullClient.Identity.ClientUid, plId));
+			return (new QueueItem(resource, new MetaData(Ts3FullClient.Identity.ClientUid, plId)), sIdx);
 		}
 
 		private void DrawNextSong() {
-			AutofillData.Next = DrawRandom();
-		}
-
-		private E<LocalStr> PlayRandom() {
-			if (AutofillData.Next == null)
-				throw new InvalidOperationException();
-
-			var item = AutofillData.Next;
-			Log.Info("Autofilling the song '{0}' from playlist '{1}'.", item.AudioResource.ResourceTitle,
-				item.MetaData.ContainingPlaylistId);
-			var res = PlayManager.Enqueue(item);
-			
-			// Only draw next song if autofill was not disabled in the meantime
-			if (AutofillEnabled) {
-				DrawNextSong();
-			} 
-			return res;
+			var (item, index) = DrawRandom();
+			Log.Info($"Autofill: Next song is '{item.AudioResource.ResourceTitle}' ({item.MetaData.ContainingPlaylistId}:{index})");
+			AutofillData.Next = item;
 		}
 
 		public void CommandAutofill(Uid uid, string[] playlistIds = null) {
@@ -266,7 +275,9 @@ namespace KDFCommands {
 						DrawNextSong();
 					} else {
 						// Else, disable autofill
+						Log.Info("Autofill: Disabled by command.");
 						DisableAndRemoveShadow();
+						return;
 					}
 				} else {
 					// Currently enabled with a selected set of playlists
@@ -281,6 +292,7 @@ namespace KDFCommands {
 						AutofillData.IssuerUid = uid;
 					}
 
+					Log.Trace("Autofill: Changed active playlists.");
 					DrawNextSong();
 				}
 			} else {
@@ -292,10 +304,17 @@ namespace KDFCommands {
 					AutofillData.Playlists = null;
 				}
 
-				AutofillData.Next = DrawRandom();
+				Log.Info("Autofill: Enabled.");
+				DrawNextSong();
 			}
 
-			if (CheckPreconditions()) {
+			if (!ShouldStayActive()) {
+				Log.Info("Autofill: Disabled (should not stay active).");
+				DisableAndRemoveShadow();
+				return;
+			}
+
+			if (ShouldFillSong()) {
 				var (item, next) = DoAutofill();
 				PlayManager.Enqueue(item);
 				PlayManager.NextSongShadow = next;
