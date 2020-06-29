@@ -841,6 +841,9 @@ namespace KDFCommands {
 
 			[JsonProperty(PropertyName = "ContainingListId")]
 			public string ContainingListId { get; set; }
+			
+			[JsonProperty(PropertyName = "ResourceId")]
+			public string ResourceId { get; set; }
 		}
 
 		public class CurrentQueueInfo {
@@ -883,7 +886,8 @@ namespace KDFCommands {
 			return new QueueItemInfo {
 				ContainingListId = qi.MetaData.ContainingPlaylistId,
 				Title = restrict ? null : qi.AudioResource.ResourceTitle,
-				UserId = qi.MetaData.ResourceOwnerUid.GetValueOrDefault(Uid.Null).Value
+				UserId = qi.MetaData.ResourceOwnerUid.GetValueOrDefault(Uid.Null).Value,
+				ResourceId = qi.AudioResource.ResourceId
 			};
 		}
 
