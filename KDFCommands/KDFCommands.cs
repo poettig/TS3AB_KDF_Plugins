@@ -437,8 +437,10 @@ namespace KDFCommands {
 			string url,
 			string target = null,
 			bool silent = false) {
+			R<PlayResource, LocalStr> resource;
 			if (silent) {
-				playManager.Enqueue(url, new MetaData(uid)).UnwrapThrow();
+				resource = resolver.Load(url);
+				playManager.Enqueue(resource.UnwrapThrow().BaseData, new MetaData(uid)).UnwrapThrow();
 				return ComposeAddMessage(playManager);
 			}
 
@@ -449,7 +451,12 @@ namespace KDFCommands {
 				);
 			}
 
-			var res = playManager.Enqueue(url, new MetaData(uid));
+			resource = resolver.Load(url);
+			if (!resource.Ok) {
+				SendAddFailure(ts3Client, url, resource.Error, cc);
+			}
+
+			var res = playManager.Enqueue(resource.Value.BaseData, new MetaData(uid));
 			if (res.Ok) {
 				PrintAddMessage(ts3Client, cc, playManager);
 			} else {
