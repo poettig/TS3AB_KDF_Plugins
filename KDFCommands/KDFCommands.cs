@@ -108,7 +108,7 @@ namespace KDFCommands {
 			playManager.ResourceStopped += OnResourceStopped;
 
 			Voting = new Voting(ts3Client, ts3FullClient, confBot);
-			Autofill = new Autofill(ts3Client, playManager, playlistManager, ts3FullClient);
+			Autofill = new Autofill(ts3Client, player, playManager, playlistManager, ts3FullClient);
 			Description = new Description(player, ts3Client, playManager);
 		}
 

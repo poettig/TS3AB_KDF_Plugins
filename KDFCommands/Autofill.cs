@@ -29,6 +29,8 @@ namespace KDFCommands {
 
 		private Ts3Client Ts3Client { get; }
 
+		private Player Player { get; }
+		
 		private PlayManager PlayManager { get; }
 
 		private PlaylistManager PlaylistManager { get; }
@@ -36,11 +38,13 @@ namespace KDFCommands {
 
 		public Autofill(
 			Ts3Client ts3Client,
+			Player player,
 			PlayManager playManager,
 			PlaylistManager playlistManager,
 			TsFullClient ts3FullClient) {
 			
 			Ts3Client = ts3Client;
+			Player = player;
 			PlayManager = playManager;
 			PlaylistManager = playlistManager;
 			Ts3FullClient = ts3FullClient;
@@ -112,7 +116,7 @@ namespace KDFCommands {
 		}
 
 		private bool ShouldStayActive() {
-			return !Ts3Client.IsDefinitelyAlone(); // not alone
+			return !Ts3Client.IsDefinitelyAlone() || Player.WebSocketPipe.HasListeners; // not alone or anyone is listening via websocket
 		}
 
 		private bool ShouldFillSong() {
@@ -252,6 +256,11 @@ namespace KDFCommands {
 		}
 
 		public void CommandAutofill(Uid uid, string[] playlistIds = null) {
+			// Check if the bot is alone. If yes, throw exception as autofill can't be enabled.
+			if (!ShouldStayActive()) {
+				throw new CommandException("Noone is there to listen to what it autofilled.", CommandExceptionReason.CommandError);
+			}
+			
 			// Check if all playlists exist, otherwise throw exception
 			if (playlistIds != null) {
 				for (int i = 0; i < playlistIds.Length; ++i) {
