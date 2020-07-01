@@ -801,8 +801,7 @@ namespace KDFCommands {
 			List<(int, string)> failed = new List<(int, string)>();
 			lock (playManager.Lock) {
 				SortedSet<int> indices = ParseAndMap(queue, idList);
-				int min = int.MaxValue;
-
+				
 				foreach (int index in indices.Reverse()) {
 					QueueItem item = queue.Items[index];
 					if (uid == item.MetaData.ResourceOwnerUid || (!ci.ApiCall && info.HasRights(RightDeleteOther))) {
@@ -811,10 +810,9 @@ namespace KDFCommands {
 					} else {
 						failed.Add((index - currentSongIndex, item.AudioResource.ResourceTitle));
 					}
-					min = index;
 				}
 
-				playManager.OnQueueChanged(min);
+				playManager.OnQueueChanged(indices.Min);
 			}
 
 			succeeded.Reverse();
