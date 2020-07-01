@@ -1121,6 +1121,45 @@ namespace KDFCommands {
 
 			return $"Queued {items.Count} items from playlist {id}.";
 		}
+		
+		[Command("list item replaceurl")]
+		public static string ListItemReplaceUrlCommand(
+			PlaylistManager playlistManager,
+			ExecutionInformation info,
+			ResolveContext resolver,
+			string listId,
+			int index,
+			string url
+		) {
+			string oldTitle = "";
+			MainCommands.ModifyPlaylist(playlistManager, listId, info, list => {
+				if (index < 0 || index >= list.Items.Count) {
+					throw new CommandException("Index must be within playlist length.", CommandExceptionReason.CommandError);
+				}
+				
+				var res = list.Items[index].AudioResource;
+				if (res.AudioType != "youtube") {
+					throw new CommandException("You can't replace the URL of a non-youtube entry.", CommandExceptionReason.CommandError);
+				}
+
+				oldTitle = res.ResourceTitle;
+				var newRes = resolver.Load(url).UnwrapThrow().BaseData;
+				if (list.SongExists(new PlaylistItem(newRes))) {
+					throw new CommandException($"This song already exists in the playlist '{listId}'.", CommandExceptionReason.CommandError);
+				}
+				
+				list.Items[index].AudioResource = new AudioResource(
+					newRes.ResourceId,
+					res.TitleIsUserSet != null && res.TitleIsUserSet.Value ? res.ResourceTitle : newRes.ResourceTitle,
+					newRes.AudioType, 
+					res.AdditionalData,
+					res.TitleIsUserSet,
+					null
+				);
+			}).UnwrapThrow();
+
+			return $"Successfully replaced the youtube URL of '{oldTitle}' in playlist '{listId}' at index {index}.";
+		}
 
 		[Command("checkuser online byuid")]
 		public static bool CommandCheckUserOnlineByUid(TsFullClient ts3FullClient, string uid) {
