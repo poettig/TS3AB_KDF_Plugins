@@ -256,11 +256,6 @@ namespace KDFCommands {
 		}
 
 		public void CommandAutofill(Uid uid, string[] playlistIds = null) {
-			// Check if the bot is alone. If yes, throw exception as autofill can't be enabled.
-			if (!ShouldStayActive()) {
-				throw new CommandException("Noone is there to listen to what it autofilled.", CommandExceptionReason.CommandError);
-			}
-			
 			// Check if all playlists exist, otherwise throw exception
 			if (playlistIds != null) {
 				for (int i = 0; i < playlistIds.Length; ++i) {
@@ -305,6 +300,11 @@ namespace KDFCommands {
 					DrawNextSong();
 				}
 			} else {
+				// Check if the bot is alone. If yes, throw exception as autofill can't be enabled.
+				if (!ShouldStayActive()) {
+					throw new CommandException("Noone is here to listen to what whould be autofilled.", CommandExceptionReason.CommandError);
+				}
+				
 				// Currently disabled, enable now (with set of playlists if given)
 				AutofillData = new AutoFillData {IssuerUid = uid};
 				if (playlistIds != null && playlistIds.Length != 0) {
