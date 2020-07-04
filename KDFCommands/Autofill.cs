@@ -91,9 +91,6 @@ namespace KDFCommands {
 				PlayManager.NextSongShadow = null;
 				Log.Trace("Autofill: Removed existing shadow.");
 			}
-			
-			Ts3Client.SendChannelMessage("[" + ClientUtility.GetClientNameFromUid(Ts3FullClient, uid) + "] " +
-			                             Status("now"));
 
 			Disable();
 		}
@@ -283,7 +280,7 @@ namespace KDFCommands {
 					} else {
 						// Else, disable autofill
 						Log.Info("Autofill: Disabled by command.");
-						DisableAndRemoveShadow();
+						Disable(uid);
 						return;
 					}
 				} else {
