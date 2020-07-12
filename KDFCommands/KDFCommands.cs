@@ -1308,7 +1308,11 @@ namespace KDFCommands {
 		public static JsonValue<Dictionary<string, IList<string>>> CommandListeners(Ts3Client ts3Client, TsFullClient ts3FullClient, Player player) {
 			return JsonValue.Create(new Dictionary<string, IList<string>> {
 				{ "websocket", player.WebSocketPipe.Listeners },
-				{ "channel", ClientUtility.GetListeningClients(ts3Client, ts3FullClient).Select(client => ClientUtility.GetClientNameFromUid(ts3FullClient, client.Uid)).ToList() }	
+				{ "channel", ClientUtility.GetListeningClients(ts3Client, ts3FullClient)
+					.Where(client => !player.WebSocketPipe.Listeners.Contains(client.Uid.ToString()))
+					.Select(client => ClientUtility.GetClientNameFromUid(ts3FullClient, client.Uid))
+					.ToList()
+				}	
 			}, data => $"Via Website: {data["websocket"]}, In Channel: {data["channel"]}");
 		}
 		
