@@ -1303,7 +1303,15 @@ namespace KDFCommands {
 				IssuerName = issuerName,
 			}, info => "[" + info.IssuerName + " " + info.Uptime + "] - " + info.StreamTitle + " (" + info.ViewerCount + " viewers) - https://twitch.tv/" + info.StreamerLogin);
 		}
-
+		
+		[Command("listeners")]
+		public static JsonValue<Dictionary<string, IList<string>>> CommandListeners(Ts3Client ts3Client, TsFullClient ts3FullClient, Player player) {
+			return JsonValue.Create(new Dictionary<string, IList<string>> {
+				{ "websocket", player.WebSocketPipe.Listeners },
+				{ "channel", ClientUtility.GetListeningClients(ts3Client, ts3FullClient).Select(client => ClientUtility.GetClientNameFromUid(ts3FullClient, client.Uid)).ToList() }	
+			}, data => $"Via Website: {data["websocket"]}, In Channel: {data["channel"]}");
+		}
+		
 		public class TwitchInfo {
 			[JsonProperty("ViewerCount")]
 			public long ViewerCount { get; set; }

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using TS3AudioBot;
 using TS3AudioBot.CommandSystem;
 using TSLib;
@@ -12,6 +13,17 @@ namespace KDFCommands {
 			foreach (Client c in client.Book.Clients.Values) {
 				if (c.Channel == channel) yield return c;
 			}
+		}
+		
+		public static IEnumerable<Client> GetListeningClients(Ts3Client ts3Client, TsFullClient ts3FullClient) {
+			return GetClientsInChannel(ts3FullClient, ts3FullClient.Book.CurrentChannel().Id)
+				.Where(currentClient => {
+					if (ts3FullClient.ClientId == currentClient.Id) // exclude bot
+						return false;
+
+					var data = ts3Client.GetClientInfoById(currentClient.Id);
+					return data.Ok && !data.Value.OutputMuted;
+				});
 		}
 
 		public static IEnumerable<Client> GetClientsByUidOnline(TsFullClient client, Uid uid) {
