@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using Newtonsoft.Json;
 using TS3AudioBot;
 using TS3AudioBot.Audio;
 using TS3AudioBot.CommandSystem;
@@ -8,6 +9,7 @@ using TS3AudioBot.Helper;
 using TS3AudioBot.Localization;
 using TS3AudioBot.Playlists;
 using TS3AudioBot.ResourceFactories;
+using TS3AudioBot.Web.Api;
 using TS3AudioBot.Web.Model;
 using TSLib;
 using TSLib.Full;
@@ -50,17 +52,27 @@ namespace KDFCommands {
 			Ts3FullClient = ts3FullClient;
 		}
 
-		public string Status(string word = "") {
-			string result = "Autofill is";
-			result += word != "" ? " " + word + " " : " ";
+		public JsonValue<AutofillStatus> Status(string word = "") {
+			return JsonValue.Create(new AutofillStatus {
+				Enabled = AutofillEnabled,
+				IssuerId = AutofillData?.IssuerUid.Value,
+				IssuerName = AutofillData != null ? ClientUtility.GetClientNameFromUid(Ts3FullClient, AutofillData.IssuerUid) : null,
+				Word = word,
+				Playlists = AutofillData?.Playlists
+			}, StatusToString);
+		}
 
-			if (AutofillEnabled) {
+		private string StatusToString(AutofillStatus status) {
+			string result = "Autofill is";
+			result += status.Word != "" ? " " + status.Word + " " : " ";
+
+			if (status.Enabled) {
 				result += "enabled";
 
-				if (AutofillData.Playlists != null) {
+				if (status.Playlists != null) {
 					result += " using the playlist";
 					
-					var playlists = AutofillData.Playlists.ToList();
+					var playlists = status.Playlists.ToList();
 					if (playlists.Count == 1) {
 						result += " " + playlists[0] + ".";
 					} else {
@@ -72,7 +84,7 @@ namespace KDFCommands {
 					result += " using all playlists.";
 				}
 				
-				result += " Last change by " + ClientUtility.GetClientNameFromUid(Ts3FullClient, AutofillData.IssuerUid) + ".";
+				result += " Last change by " + status.IssuerName + ".";
 			} else {
 				result += "disabled";
 				result += ".";
@@ -332,6 +344,22 @@ namespace KDFCommands {
 			Ts3Client.SendChannelMessage("[" + ClientUtility.GetClientNameFromUid(Ts3FullClient, uid) + "] " +
 			                             Status("now"));
 		}
+	}
 
+	public class AutofillStatus {
+		[JsonProperty("Enabled")]
+		public bool Enabled { get; set; }
+		
+		[JsonProperty("IssuerId")]
+		public string IssuerId { get; set; }
+		
+		[JsonProperty("IssuerName")]
+		public string IssuerName { get; set; }
+		
+		[JsonProperty("Word")]
+		public string Word { get; set; }
+		
+		[JsonProperty("Playlists")]
+		public HashSet<string> Playlists { get; set; }
 	}
 }

@@ -1167,7 +1167,7 @@ namespace KDFCommands {
 		}
 
 		[Command("autofillstatus")]
-		public string CommandAutofillStatus() { return Autofill.Status(); }
+		public JsonValue<AutofillStatus> CommandAutofillStatus() { return Autofill.Status(); }
 
 		[Command("autofilloff")]
 		public void CommandAutofillOff(InvokerData invoker) {
@@ -1182,6 +1182,9 @@ namespace KDFCommands {
 
 		[Command("autofill")]
 		public void CommandAutofill(InvokerData invoker, string[] playlistIds = null) {
+			if (invoker.IsAnonymous) {
+				throw new CommandException("An anonymous user can't enable autofill", CommandExceptionReason.CommandError);
+			}
 			Autofill.CommandAutofill(invoker.ClientUid, playlistIds);
 		}
 
@@ -1288,7 +1291,7 @@ namespace KDFCommands {
 				throw new CommandException("Missing StreamerInfo for some reason.", CommandExceptionReason.MissingContext);
 			}
 			
-			return JsonValue.Create<TwitchInfo>(new TwitchInfo {
+			return JsonValue.Create(new TwitchInfo {
 				ViewerCount = streamInfo.ViewerCount,
 				Uptime = DateTimeOffset.UtcNow.ToUnixTimeSeconds() - streamInfo.StartedAt.ToUnix(),
 				ThumbnailUrl = streamInfo.ThumbnailUrl,
