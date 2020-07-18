@@ -189,7 +189,7 @@ namespace KDFCommands {
 				var items = PlayManager.Queue.Items;
 				if (items.Count > 0) {
 					for (var j = items.Count - 1; j != 0 && j >= items.Count - 250; j--) {
-						if (!items[j].AudioResource.Equals(song.PlaylistItem.AudioResource)) {
+						if (!items[j].AudioResource.Equals(song.PlaylistItem)) {
 							continue;
 						}
 
@@ -211,7 +211,7 @@ namespace KDFCommands {
 				chosenSong = randomSongs[^1];
 			}
 
-			var resource = chosenSong.PlaylistItem.AudioResource;
+			var resource = chosenSong.PlaylistItem;
 			if (resource == null) {
 				// Should not happen
 				throw new CommandException(

@@ -3,15 +3,16 @@ using System.Collections.Generic;
 using TS3AudioBot.CommandSystem;
 using TS3AudioBot.Helper;
 using TS3AudioBot.Playlists;
+using TS3AudioBot.ResourceFactories;
 using TS3AudioBot.Web.Model;
 
 namespace KDFCommands {
 	public class SongRandomizerResult {
 		public readonly string PlaylistId;
 		public readonly int IndexInPlaylist;
-		public readonly PlaylistItem PlaylistItem;
+		public readonly AudioResource PlaylistItem;
 
-		public SongRandomizerResult(string playlistId, int indexInPlaylist, PlaylistItem playlistItem) {
+		public SongRandomizerResult(string playlistId, int indexInPlaylist, AudioResource playlistItem) {
 			PlaylistId = playlistId;
 			IndexInPlaylist = indexInPlaylist;
 			PlaylistItem = playlistItem;
@@ -49,7 +50,7 @@ namespace KDFCommands {
 		public static IList<SongRandomizerResult> GetRandomSongs(int count, PlaylistManager playlistManager, HashSet<string> playlistSubset = null) {
 			// Get total number of songs from all selected playlists
 			var numSongs = 0;
-			var playlistsUnfiltered = playlistManager.GetAvailablePlaylists().UnwrapThrow();
+			var playlistsUnfiltered = playlistManager.GetAvailablePlaylists();
 			var playlists = new List<PlaylistInfo>();
 			foreach (var playlist in playlistsUnfiltered) {
 				if (playlistSubset != null && !playlistSubset.Contains(playlist.Id)) {
@@ -72,13 +73,13 @@ namespace KDFCommands {
 				}
 
 				var (list, index) = infoOpt.Value;
-				var (playlist, _) = playlistManager.LoadPlaylist(list.Id).UnwrapThrow();
+				var (playlist, _) = playlistManager.GetPlaylist(list.Id).UnwrapThrow();
 
-				if (playlist.Items.Count != list.SongCount) {
+				if (playlist.Count != list.SongCount) {
 					Log.Warn("SongRandomizer: Playlist '{0}' is possibly corrupted!", list.Id);
 				}
 
-				var result = new SongRandomizerResult(list.Id, index, playlist.Items[index]);
+				var result = new SongRandomizerResult(list.Id, index, playlist[index]);
 				if (randomSongs.Contains(result) && numSongs > count) {
 					Log.Trace("SongRandomizer: Ignored duplicate song.");
 					i--;

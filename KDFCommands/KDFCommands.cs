@@ -164,16 +164,16 @@ namespace KDFCommands {
 			}
 		}
 
-		public static HashSet<AudioResource> ListInteresection(IReadOnlyPlaylist listA, IReadOnlyPlaylist listB) {
-			var itemsInB = new HashSet<AudioResource>(listB.Items.Select(i => i.AudioResource));
-			var itemsInA = new HashSet<AudioResource>(listA.Items.Select(i => i.AudioResource));
+		public static HashSet<AudioResource> ListInteresection(IPlaylist listA, IPlaylist listB) {
+			var itemsInB = new HashSet<AudioResource>(listB.Items);
+			var itemsInA = new HashSet<AudioResource>(listA.Items);
 			itemsInA.IntersectWith(itemsInB);
 			return itemsInA;
 		}
 
-		public static HashSet<AudioResource> ListDifference(IReadOnlyPlaylist listA, IReadOnlyPlaylist listB) {
-			var itemsInB = new HashSet<AudioResource>(listB.Items.Select(i => i.AudioResource));
-			var itemsInA = new HashSet<AudioResource>(listA.Items.Select(i => i.AudioResource));
+		public static HashSet<AudioResource> ListDifference(IPlaylist listA, IPlaylist listB) {
+			var itemsInB = new HashSet<AudioResource>(listB.Items);
+			var itemsInA = new HashSet<AudioResource>(listA.Items);
 			itemsInA.ExceptWith(itemsInB);
 			return itemsInA;
 		}
@@ -192,15 +192,19 @@ namespace KDFCommands {
 
 		private static void ListRemoveAll(StringBuilder builder,
 			PlaylistManager playlistManager, ExecutionInformation info, string listId, HashSet<AudioResource> items) {
-			MainCommands.ModifyPlaylist(playlistManager, listId, info, playlist => {
-				for (var i = playlist.Items.Count - 1; i >= 0; i--) {
-					var res = playlist.Items[i].AudioResource;
+			MainCommands.ModifyPlaylist(playlistManager, listId, info, editor => {
+				var indices = new List<int>(items.Count);
+				for (var i = editor.Playlist.Count - 1; i >= 0; i--) {
+					var res = editor.Playlist[i];
 					if (!items.Contains(res)) 
 						continue;
-					playlist.RemoveAt(i);
+					indices.Add(i);
+
 					builder.AppendLine().Append("Removed ");
 					AppendAudioResource(builder, i, res);
 				}
+
+				editor.RemoveIndices(indices);
 			}).UnwrapThrow();
 		}
 
@@ -208,8 +212,8 @@ namespace KDFCommands {
 		public static string CommandListIntersect(PlaylistManager playlistManager, ExecutionInformation info, string listId, string listTo, string[] args = null) {
 			var additionalArgs = args ?? Array.Empty<string>();
 
-			var (listA, aId) = playlistManager.LoadPlaylist(listId).UnwrapThrow();
-			var (listB, bId) = playlistManager.LoadPlaylist(listTo).UnwrapThrow();
+			var (listA, aId) = playlistManager.GetPlaylist(listId).UnwrapThrow();
+			var (listB, bId) = playlistManager.GetPlaylist(listTo).UnwrapThrow();
 
 			// Return songs in both lists
 			var inBoth = ListInteresection(listA, listB);
@@ -234,8 +238,8 @@ namespace KDFCommands {
 		public static string CommandListDifference(PlaylistManager playlistManager, ExecutionInformation info, string listId, string listTo, string[] args = null) {
 			var additionalArgs = args ?? Array.Empty<string>();
 
-			var (listA, aId) = playlistManager.LoadPlaylist(listId).UnwrapThrow();
-			var (listB, bId) = playlistManager.LoadPlaylist(listTo).UnwrapThrow();
+			var (listA, aId) = playlistManager.GetPlaylist(listId).UnwrapThrow();
+			var (listB, bId) = playlistManager.GetPlaylist(listTo).UnwrapThrow();
 
 			var difference = ListDifference(listA, listB);
 
@@ -304,10 +308,10 @@ namespace KDFCommands {
 			var allItems = new List<QueueItem>();
 			for (var i = 0; i < numPlaylists; i++) {
 				var userProvidedId = parts[i];
-				var (plist, id) = playlistManager.LoadPlaylist(userProvidedId).UnwrapThrow();
-				var items = new List<PlaylistItem>(plist.Items);
+				var (plist, id) = playlistManager.GetPlaylist(userProvidedId).UnwrapThrow();
+				var items = new List<AudioResource>(plist.Items);
 
-				int numSongsToTake = Tools.Clamp(songsPerPlaylist, 0, plist.Items.Count);
+				int numSongsToTake = Tools.Clamp(songsPerPlaylist, 0, items.Count);
 				if (numSongsToTake != songsPerPlaylist) {
 					truncated = true;
 				}
@@ -316,7 +320,7 @@ namespace KDFCommands {
 
 				var meta = new MetaData(invoker.ClientUid, id);
 				Shuffle(items, new Random());
-				allItems.AddRange(items.Take(numSongsToTake).Select(item => new QueueItem(item.AudioResource, meta)));
+				allItems.AddRange(items.Take(numSongsToTake).Select(item => new QueueItem(item, meta)));
 			}
 
 			// Shuffle again across all added songs from all playlists
@@ -669,8 +673,15 @@ namespace KDFCommands {
 			string title;
 			try {
 				var playResource = resolver.Load(url).UnwrapThrow();
-				title = playResource.BaseData.ResourceTitle;
-				(_, index) = MainCommands.ListAddItem(playlistManager, info, target, playResource.BaseData);
+				title = playResource.BaseData.ResourceTitle; 
+				var r = MainCommands.ListAddItem(playlistManager, info, target, playResource.BaseData);
+				if (!r.Ok) {
+					ClientUtility.SendMessage(ts3Client, cc,
+						"Error occured for '" + url + "': Already contained in the playlist");
+					return null;
+				}
+
+				index = r.Value;
 			} catch (CommandException e) {
 				ClientUtility.SendMessage(ts3Client, cc, "Error occured for '" + url + "': " + e.Message);
 				return null;
@@ -707,7 +718,14 @@ namespace KDFCommands {
 			AudioResource audioResource = result.Value[0];
 			int index;
 			try {
-				(_, index) = MainCommands.ListAddItem(playlistManager, info, target, audioResource);
+				var r = MainCommands.ListAddItem(playlistManager, info, target, audioResource);
+				if (!r.Ok) {
+					ClientUtility.SendMessage(ts3Client, cc,
+						"Error occured for '" + query + "': Already contained in the playlist");
+					return null;
+				}
+
+				index = r.Value;
 			} catch (CommandException e) {
 				ClientUtility.SendMessage(ts3Client, cc, "Error occured for '" + query + "': " + e.Message);
 				return null;
@@ -1033,16 +1051,16 @@ namespace KDFCommands {
 		public static string CommandItemQueue(
 			InvokerData invoker, PlaylistManager playlistManager, PlayManager playManager, string userProvidedId,
 			string indicesString, string uid = null) {
-			var (plist, id) = playlistManager.LoadPlaylist(userProvidedId).UnwrapThrow();
-			var indices = ParseIndicesInBounds(indicesString, 0, plist.Items.Count - 1);
-			var items = new List<PlaylistItem>(indices.Count);
-			items.AddRange(indices.Select(index => plist.Items[index]));
+			var (plist, id) = playlistManager.GetPlaylist(userProvidedId).UnwrapThrow();
+			var indices = ParseIndicesInBounds(indicesString, 0, plist.Count - 1);
+			var items = new List<AudioResource>(indices.Count);
+			items.AddRange(indices.Select(index => plist[index]));
 
-			playManager.Enqueue(items.Select(item => item.AudioResource),
+			playManager.Enqueue(items,
 				new MetaData(uid != null ? Uid.To(uid) : invoker.ClientUid, id)).UnwrapThrow();
 
 			if (indices.Count == 1) {
-				return $"Queued '{items[0].AudioResource.ResourceTitle}' from playlist {id}.";
+				return $"Queued '{items[0].ResourceTitle}' from playlist {id}.";
 			}
 
 			return $"Queued {items.Count} items from playlist {id}.";
@@ -1055,36 +1073,63 @@ namespace KDFCommands {
 			ResolveContext resolver,
 			string listId,
 			int index,
-			string url
-		) {
-			string oldTitle = "";
-			MainCommands.ModifyPlaylist(playlistManager, listId, info, list => {
-				if (index < 0 || index >= list.Items.Count) {
-					throw new CommandException("Index must be within playlist length.", CommandExceptionReason.CommandError);
-				}
-				
-				var res = list.Items[index].AudioResource;
-				if (res.AudioType != "youtube") {
-					throw new CommandException("You can't replace the URL of a non-youtube entry.", CommandExceptionReason.CommandError);
-				}
+			string url,
+			string[] args = null) {
+			var additionalArgs = args ?? Array.Empty<string>();
+			
+			string id;
+			AudioResource resource;
 
-				oldTitle = res.ResourceTitle;
+			{
+				var (list, s) = playlistManager.GetPlaylist(listId).UnwrapThrow();
+				MainCommands.DoBoundsCheck(list, index);
+				id = s;
+				resource = list[index];
+				if (resource.AudioType != "youtube")
+					throw new CommandException("You can't replace the URL of a non-youtube entry.",
+						CommandExceptionReason.CommandError);
+			}
+
+			AudioResource newResource;
+			{
 				var newRes = resolver.Load(url).UnwrapThrow().BaseData;
-				if (list.SongExists(new PlaylistItem(newRes))) {
-					throw new CommandException($"This song already exists in the playlist '{listId}'.", CommandExceptionReason.CommandError);
-				}
-				
-				list.Items[index].AudioResource = new AudioResource(
+				newResource = new AudioResource(
 					newRes.ResourceId,
-					res.TitleIsUserSet != null && res.TitleIsUserSet.Value ? res.ResourceTitle : newRes.ResourceTitle,
-					newRes.AudioType, 
-					res.AdditionalData,
-					res.TitleIsUserSet,
-					null
+					resource.TitleIsUserSet != null && resource.TitleIsUserSet.Value
+						? resource.ResourceTitle
+						: newRes.ResourceTitle,
+					newRes.AudioType,
+					resource.AdditionalData,
+					resource.TitleIsUserSet
 				);
-			}).UnwrapThrow();
+			}
 
-			return $"Successfully replaced the youtube URL of '{oldTitle}' in playlist '{listId}' at index {index}.";
+			if (additionalArgs.Contains("--all")) {
+				if (!playlistManager.TryGetUniqueResourceInfo(resource, out var resourceInfo))
+					throw new CommandException("Could not find the list item", CommandExceptionReason.InternalError);
+
+				var builder = new StringBuilder();
+				builder.AppendJoin(", ", resourceInfo.ContainingLists.Select(kv => '\'' + kv.Key + '\''));
+
+				// Check all lists for modifiable
+				foreach (var occKv in resourceInfo.ContainingLists) {
+					var (list, lid) = playlistManager.GetPlaylist(occKv.Key).UnwrapThrow();
+					MainCommands.CheckPlaylistModifiable(lid, list, info);
+				}
+
+				playlistManager.ChangeItemAtDeep(id, index, newResource).UnwrapThrow();
+				return $"Successfully replaced the youtube URL of '{resource.ResourceTitle}' in playlists {builder}.";
+			} else {
+				bool replaced = false;
+				MainCommands.ModifyPlaylist(playlistManager, id, info, editor => {
+					replaced = editor.ChangeItemAt(index, newResource);
+					if(!replaced)
+						editor.RemoveItemAt(index);
+				}).UnwrapThrow();
+				if(!replaced)
+					return $"This song already existed in the playlist '{id}', removed the entry to replace.";
+				return $"Successfully replaced the youtube URL of '{resource.ResourceTitle}' in playlist '{id}' at index {index}.";
+			}
 		}
 
 		[Command("checkuser online byuid")]
