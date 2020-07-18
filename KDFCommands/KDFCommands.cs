@@ -165,15 +165,15 @@ namespace KDFCommands {
 		}
 
 		public static HashSet<AudioResource> ListInteresection(IPlaylist listA, IPlaylist listB) {
-			var itemsInB = new HashSet<AudioResource>(listB.Items);
-			var itemsInA = new HashSet<AudioResource>(listA.Items);
+			var itemsInB = new HashSet<AudioResource>(listB);
+			var itemsInA = new HashSet<AudioResource>(listA);
 			itemsInA.IntersectWith(itemsInB);
 			return itemsInA;
 		}
 
 		public static HashSet<AudioResource> ListDifference(IPlaylist listA, IPlaylist listB) {
-			var itemsInB = new HashSet<AudioResource>(listB.Items);
-			var itemsInA = new HashSet<AudioResource>(listA.Items);
+			var itemsInB = new HashSet<AudioResource>(listB);
+			var itemsInA = new HashSet<AudioResource>(listA);
 			itemsInA.ExceptWith(itemsInB);
 			return itemsInA;
 		}
@@ -309,7 +309,7 @@ namespace KDFCommands {
 			for (var i = 0; i < numPlaylists; i++) {
 				var userProvidedId = parts[i];
 				var (plist, id) = playlistManager.GetPlaylist(userProvidedId).UnwrapThrow();
-				var items = new List<AudioResource>(plist.Items);
+				var items = new List<AudioResource>(plist);
 
 				int numSongsToTake = Tools.Clamp(songsPerPlaylist, 0, items.Count);
 				if (numSongsToTake != songsPerPlaylist) {
