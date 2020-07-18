@@ -1315,7 +1315,17 @@ namespace KDFCommands {
 				}	
 			}, data => $"Via Website: {data["websocket"]}, In Channel: {data["channel"]}");
 		}
-		
+
+		[Command("randomsongs")]
+		public static JsonArray<SongRandomizerResult> CommandRandomSongs(PlaylistManager playlistManager, int count) {
+			if (count <= 0) {
+				throw new CommandException("You cannot randomize 0 or less songs.", CommandExceptionReason.CommandError);
+			}
+
+			var randomSongs = SongRandomizer.GetRandomSongs(count, playlistManager);
+			return new JsonArray<SongRandomizerResult>(randomSongs);
+		}
+			
 		public class TwitchInfo {
 			[JsonProperty("ViewerCount")]
 			public long ViewerCount { get; set; }

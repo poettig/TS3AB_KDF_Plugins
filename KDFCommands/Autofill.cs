@@ -5,24 +5,23 @@ using Newtonsoft.Json;
 using TS3AudioBot;
 using TS3AudioBot.Audio;
 using TS3AudioBot.CommandSystem;
-using TS3AudioBot.Helper;
-using TS3AudioBot.Localization;
 using TS3AudioBot.Playlists;
-using TS3AudioBot.ResourceFactories;
 using TS3AudioBot.Web.Api;
-using TS3AudioBot.Web.Model;
 using TSLib;
 using TSLib.Full;
 
 namespace KDFCommands {
-	class Autofill {
+	internal class Autofill {
 		private static readonly NLog.Logger Log = NLog.LogManager.GetCurrentClassLogger();
 
 		private class AutoFillData {
-			public Random Random { get; } = new Random();
-			public HashSet<string> Playlists { get; set; } = null;
+			public HashSet<string> Playlists { get; set; }
 			public QueueItem Next { get; set; }
 			public Uid IssuerUid { get; set; }
+
+			public AutoFillData(Uid issuerUid) {
+				IssuerUid = issuerUid;
+			}
 		}
 
 		private AutoFillData AutofillData { get; set; }
@@ -107,17 +106,17 @@ namespace KDFCommands {
 			Disable();
 		}
 
-		private bool playbackStoppedReentrantGuard = false;
+		private bool _playbackStoppedReentrantGuard = false;
 
 		public void OnPlaybackStopped(PlaybackStoppedEventArgs eventArgs) {
-			if (playbackStoppedReentrantGuard)
+			if (_playbackStoppedReentrantGuard)
 				return;
-			playbackStoppedReentrantGuard = true;
+			_playbackStoppedReentrantGuard = true;
 
 			// Enqueue fires playback stopped event if the song failed to play
 			UpdateAutofillOnPlaybackStopped(eventArgs);
 
-			playbackStoppedReentrantGuard = false;
+			_playbackStoppedReentrantGuard = false;
 		}
 
 		public void Disable(Uid uid) {
@@ -177,66 +176,24 @@ namespace KDFCommands {
 			return (item, next);
 		}
 
-		private static R<(PlaylistInfo list, int offset)> FindSong(int index, IEnumerable<PlaylistInfo> playlists) {
-			foreach (var list in playlists) {
-				if (index < list.SongCount)
-					return (list, index);
-				index -= list.SongCount;
-			}
-
-			return R.Err;
-		}
-
 		private (QueueItem item, int offset) DrawRandom() {
 			// Play random song from a random playlist currently in the selected set
 			
-			// Get total number of songs from all selected playlists
-			var numSongs = 0;
-			var playlistsUnfiltered = PlaylistManager.GetAvailablePlaylists().UnwrapThrow();
-			List<PlaylistInfo> playlists = new List<PlaylistInfo>();
-			foreach (var playlist in playlistsUnfiltered) {
-				if (AutofillData.Playlists != null && !AutofillData.Playlists.Contains(playlist.Id)) {
-					continue;
-				}
-
-				playlists.Add(playlist);
-				numSongs += playlist.SongCount;
-			}
-
-			var sIdx = 0;
-			string plId = null;
-			AudioResource resource = null;
-			for (var i = 0; i < 5; i++) {
-				// Draw random song number
-				var songIndex = AutofillData.Random.Next(0, numSongs);
-
-				// Find the randomized song
-				var infoOpt = FindSong(songIndex, playlists);
-				if (!infoOpt.Ok)
-					throw new CommandException("Autofill: Could not find the song at index " + songIndex + ".",
-						CommandExceptionReason.InternalError);
-
-				var (list, index) = infoOpt.Value;
-				var (playlist, _) = PlaylistManager.LoadPlaylist(list.Id).UnwrapThrow();
-
-				if (playlist.Items.Count != list.SongCount)
-					Log.Warn("Playlist '{0}' is possibly corrupted!", list.Id);
-
-				sIdx = index;
-				plId = list.Id;
-				resource = playlist.Items[index].AudioResource;
-
+			// Get 5 random songs
+			SongRandomizerResult chosenSong = null;
+			var randomSongs = SongRandomizer.GetRandomSongs(5, PlaylistManager, AutofillData.Playlists);
+			foreach (var song in randomSongs) {
 				// Check if the song was already played in the last 250 songs, if not take this one.
 				// If items.count < 250, the subtraction is negative, meaning that j == 0 will be reached first
 				var foundDuplicate = false;
 				var items = PlayManager.Queue.Items;
 				if (items.Count > 0) {
 					for (var j = items.Count - 1; j != 0 && j >= items.Count - 250; j--) {
-						if (!items[j].AudioResource.Equals(resource)) {
+						if (!items[j].AudioResource.Equals(song.PlaylistItem.AudioResource)) {
 							continue;
 						}
 
-						Log.Trace("The song {0} was already played {1} songs ago. Searching another one...",
+						Log.Trace("Autofill: The song {0} was already played {1} songs ago. Searching another one...",
 							items[j].AudioResource.ResourceTitle, items.Count - j - 1);
 						foundDuplicate = true;
 						break;
@@ -244,21 +201,28 @@ namespace KDFCommands {
 				}
 
 				if (!foundDuplicate) {
+					chosenSong = song;
 					break;
 				}
 			}
 
+			if (chosenSong == null) {
+				// Just play the last result anyway
+				chosenSong = randomSongs[^1];
+			}
+
+			var resource = chosenSong.PlaylistItem.AudioResource;
 			if (resource == null) {
 				// Should not happen
 				throw new CommandException(
-					"Autofill: Missing resource for song at index " + sIdx + " in playlist " + plId + ".",
+					"Autofill: Missing resource for song at index " + chosenSong.IndexInPlaylist + " in playlist " + chosenSong.PlaylistId + ".",
 					CommandExceptionReason.InternalError);
 			}
 
-			using (System.IO.StreamWriter statfile = new System.IO.StreamWriter("stats_autofill.txt", true)) {
+			using (var statfile = new System.IO.StreamWriter("stats_autofill.txt", true)) {
 				statfile.WriteLine(DateTimeOffset.UtcNow.ToUnixTimeSeconds() + ":::" + resource.ResourceTitle + ":::" + resource.ResourceId);
 			}
-			return (new QueueItem(resource, new MetaData(Ts3FullClient.Identity.ClientUid, plId)), sIdx);
+			return (new QueueItem(resource, new MetaData(Ts3FullClient.Identity.ClientUid, chosenSong.PlaylistId)), chosenSong.IndexInPlaylist);
 		}
 
 		private void DrawNextSong() {
@@ -318,7 +282,7 @@ namespace KDFCommands {
 				}
 				
 				// Currently disabled, enable now (with set of playlists if given)
-				AutofillData = new AutoFillData {IssuerUid = uid};
+				AutofillData = new AutoFillData(uid);
 				if (playlistIds != null && playlistIds.Length != 0) {
 					AutofillData.Playlists = new HashSet<string>(playlistIds);
 				} else {

@@ -1,8 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using NLog.Fluent;
 using TS3AudioBot;
+using TS3AudioBot.Audio;
 using TS3AudioBot.CommandSystem;
+using TS3AudioBot.Playlists;
+using TS3AudioBot.ResourceFactories;
+using TS3AudioBot.Web.Model;
 using TSLib;
 using TSLib.Full;
 using TSLib.Full.Book;
