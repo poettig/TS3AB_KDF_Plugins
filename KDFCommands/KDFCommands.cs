@@ -427,6 +427,9 @@ namespace KDFCommands {
 
 		private static void SendAddFailure(Ts3Client ts3Client, string query, LocalStr error, ClientCall client) {
 			ClientUtility.SendMessage(ts3Client, client, "Error occured for + '" + query + "': " + error);
+			if (client == null) {
+				throw new CommandException(error.ToString(), CommandExceptionReason.CommandError);
+			}
 		}
 
 		private static string AddUrl(
@@ -631,7 +634,7 @@ namespace KDFCommands {
 		}
 
 		[Command("list add")]
-		public static void CommandListYoutube(
+		public static void CommandListAdd(
 			PlayManager playManager,
 			PlaylistManager playlistManager,
 			ExecutionInformation execInfo,
@@ -655,6 +658,32 @@ namespace KDFCommands {
 			ParseMulti(urlHandler, queryHandler, playManager, playlistManager, execInfo, resolver, invoker, cc,
 				ts3Client, ts3FullClient, parts, id);
 		}
+		
+		[Command("list createwithuid")]
+		public static void CommandListCreateWithUid(PlaylistManager playlistManager, TsFullClient ts3FullClient, string uidStr, string listId) {
+			// Check if user exists, throws exception if not.
+			Uid uid = Uid.To(uidStr);
+			ClientUtility.GetClientNameFromUid(ts3FullClient, uid);
+			MainCommands.CommandListCreate(playlistManager, new InvokerData(uid), listId);
+		}
+		
+		[Command("list addwithuid")]
+		public static void CommandListAddWithUid(
+			PlayManager playManager,
+			PlaylistManager playlistManager,
+			ExecutionInformation execInfo,
+			ResolveContext resolver,
+			Ts3Client ts3Client,
+			TsFullClient ts3FullClient,
+			string uidStr,
+			string userProvidedId,
+			string message) {
+
+			// Check if user exists, throws exception if not.
+			Uid uid = Uid.To(uidStr);
+			ClientUtility.GetClientNameFromUid(ts3FullClient, uid);
+			CommandListAdd(playManager, playlistManager, execInfo, resolver, new InvokerData(uid), null, ts3Client, ts3FullClient, userProvidedId, message);
+		}
 
 		private static string ListAddUrl(
 			PlaylistManager playlistManager,
@@ -676,8 +705,7 @@ namespace KDFCommands {
 				title = playResource.BaseData.ResourceTitle; 
 				var r = MainCommands.ListAddItem(playlistManager, info, target, playResource.BaseData);
 				if (!r.Ok) {
-					ClientUtility.SendMessage(ts3Client, cc,
-						"Error occured for '" + url + "': Already contained in the playlist");
+					ClientUtility.SendMessage(ts3Client, cc, "Error occured for '" + url + "': Already contained in the playlist");
 					return null;
 				}
 
@@ -692,7 +720,6 @@ namespace KDFCommands {
 				"' to playlist '" + target +
 				"' at position " + index
 			);
-
 			return null;
 		}
 
@@ -720,14 +747,19 @@ namespace KDFCommands {
 			try {
 				var r = MainCommands.ListAddItem(playlistManager, info, target, audioResource);
 				if (!r.Ok) {
-					ClientUtility.SendMessage(ts3Client, cc,
-						"Error occured for '" + query + "': Already contained in the playlist");
+					ClientUtility.SendMessage(ts3Client, cc, "Error occured for '" + query + "': Already contained in the playlist");
+					if (cc == null) {
+						throw new CommandException("Song already is in the playlist.", CommandExceptionReason.CommandError);
+					}
 					return null;
 				}
 
 				index = r.Value;
 			} catch (CommandException e) {
 				ClientUtility.SendMessage(ts3Client, cc, "Error occured for '" + query + "': " + e.Message);
+				if (cc == null) {
+					throw new CommandException(e.Message, CommandExceptionReason.CommandError);
+				}
 				return null;
 			}
 
@@ -737,7 +769,6 @@ namespace KDFCommands {
 				"' to playlist '" + target +
 				"' at position " + index
 			);
-
 			return null;
 		}
 
