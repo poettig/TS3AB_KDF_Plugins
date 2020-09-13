@@ -110,23 +110,23 @@ namespace KDFCommands {
 			}
 		}
 
-		private readonly Dictionary<string, CurrentVoteData> _currentVotes =
+		private readonly Dictionary<string, CurrentVoteData> currentVotes =
 			new Dictionary<string, CurrentVoteData>();
 
 		public int Needed { get; private set; }
 
-		private readonly List<CurrentVoteData> _removeOnResourceEnded = new List<CurrentVoteData>();
+		private readonly List<CurrentVoteData> removeOnResourceEnded = new List<CurrentVoteData>();
 
-		public IReadOnlyDictionary<string, CurrentVoteData> CurrentVotes => _currentVotes;
+		public IReadOnlyDictionary<string, CurrentVoteData> CurrentVotes => currentVotes;
 
-		private readonly Ts3Client _client;
-		private readonly ConfBot _config;
-		private readonly TsFullClient _ts3FullClient;
+		private readonly Ts3Client client;
+		private readonly ConfBot config;
+		private readonly TsFullClient ts3FullClient;
 
 		public Voting(Ts3Client client, TsFullClient ts3FullClient, ConfBot config) {
-			_client = client;
-			_config = config;
-			_ts3FullClient = ts3FullClient;
+			this.client = client;
+			this.config = config;
+			this.ts3FullClient = ts3FullClient;
 		}
 
 		public static string ExecuteTryCatch(
@@ -168,41 +168,41 @@ namespace KDFCommands {
 		}
 
 		public void OnSongEnd() {
-			foreach (var vote in _removeOnResourceEnded) {
-				_currentVotes.Remove(vote.Command);
-				_client.SendChannelMessage($"Stopped vote for \"{vote.Command}\" due to end of resource.");
+			foreach (var vote in removeOnResourceEnded) {
+				currentVotes.Remove(vote.Command);
+				client.SendChannelMessage($"Stopped vote for \"{vote.Command}\" due to end of resource.");
 			}
 
-			_removeOnResourceEnded.Clear();
+			removeOnResourceEnded.Clear();
 		}
 
 		public void OnBotChannelChanged() {
-			var channel = _ts3FullClient.Book.CurrentChannel();
+			var channel = ts3FullClient.Book.CurrentChannel();
 			if (channel == null) {
 				Log.Warn("OnBotChannelChanged: Could not get bot channel");
 				return;
 			}
 
-			var clients = ClientUtility.GetClientsInChannel(_ts3FullClient, channel.Id)
+			var clients = ClientUtility.GetClientsInChannel(ts3FullClient, channel.Id)
 				.Where(CheckClientIncludedInVote)
 				.Select(c => c.Uid);
 			UpdateNeededForUsers(clients.ToHashSet());
 		}
 
 		public void CancelAll() {
-			_currentVotes.Clear();
+			currentVotes.Clear();
 		}
 
 		private void Add(CurrentVoteData vote) {
-			_currentVotes.Add(vote.Command, vote);
+			currentVotes.Add(vote.Command, vote);
 			if (vote.RemoveOnResourceEnd)
-				_removeOnResourceEnded.Add(vote);
+				removeOnResourceEnded.Add(vote);
 		}
 
 		private void Remove(CurrentVoteData vote) {
-			_currentVotes.Remove(vote.Command);
+			currentVotes.Remove(vote.Command);
 			if (vote.RemoveOnResourceEnd)
-				_removeOnResourceEnded.Remove(vote);
+				removeOnResourceEnded.Remove(vote);
 		}
 
 		private bool CheckAndFire(CurrentVoteData vote) {
@@ -211,13 +211,13 @@ namespace KDFCommands {
 				return false;
 			}
 
-			_client.SendChannelMessage($"Enough votes, executing \"{vote.Command}\"...");
+			client.SendChannelMessage($"Enough votes, executing \"{vote.Command}\"...");
 
 			Remove(vote);
-			var res = ExecuteTryCatch(_config, true, vote.Executor,
-				err => _client.SendChannelMessage(err).UnwrapToLog(Log));
+			var res = ExecuteTryCatch(config, true, vote.Executor,
+				err => client.SendChannelMessage(err).UnwrapToLog(Log));
 			if (!string.IsNullOrEmpty(res))
-				_client.SendChannelMessage(res).UnwrapToLog(Log);
+				client.SendChannelMessage(res).UnwrapToLog(Log);
 
 			return true;
 		}
@@ -244,17 +244,17 @@ namespace KDFCommands {
 			public int VotesNeeded { get; set; }
 		}
 		
-		private bool CheckClientIncludedInVote(Client client) {
-			if (_ts3FullClient.ClientId == client.Id) // exclude bot
+		private bool CheckClientIncludedInVote(Client clientToCheck) {
+			if (ts3FullClient.ClientId == clientToCheck.Id) // exclude bot
 				return false;
 
-			var data = _client.GetClientInfoById(client.Id);
+			var data = this.client.GetClientInfoById(clientToCheck.Id);
 			return data.Ok && !data.Value.OutputMuted && MinIdleTimeForVoteIgnore > data.Value.ClientIdleTime;
 		}
 
 		private CallerInfo CreateCallerInfo() {
 			return new CallerInfo(false)
-				{SkipRightsChecks = true, CommandComplexityMax = _config.Commands.CommandComplexity};
+				{SkipRightsChecks = true, CommandComplexityMax = config.Commands.CommandComplexity};
 		}
 
 		public Result CommandVote(
@@ -287,17 +287,17 @@ namespace KDFCommands {
 						Remove(currentVote);
 						votesChanged = true;
 						
-						_client.SendChannelMessage($"Removed vote of {ClientUtility.GetClientNameFromUid(_ts3FullClient, invoker)} and stopped vote for \"{command}\".");
+						client.SendChannelMessage($"Removed vote of {ClientUtility.GetClientNameFromUid(ts3FullClient, invoker)} and stopped vote for \"{command}\".");
 					} else {
 						votesChanged = false;
-						_client.SendChannelMessage($"Removed vote of {ClientUtility.GetClientNameFromUid(_ts3FullClient, invoker)} for \"{command}\" ({currentVote.Voters.Count} votes of {Needed})");
+						client.SendChannelMessage($"Removed vote of {ClientUtility.GetClientNameFromUid(ts3FullClient, invoker)} for \"{command}\" ({currentVote.Voters.Count} votes of {Needed})");
 					}
 
 					voteCompleted = false;
 				} else {
 					currentVote.Voters.Add(invoker);
 					voteAdded = true;
-					_client.SendChannelMessage($"Added vote of {ClientUtility.GetClientNameFromUid(_ts3FullClient, invoker)} for \"{command}\" ({currentVote.Voters.Count} votes of {Needed})");
+					client.SendChannelMessage($"Added vote of {ClientUtility.GetClientNameFromUid(ts3FullClient, invoker)} for \"{command}\" ({currentVote.Voters.Count} votes of {Needed})");
 					votesChanged = false;
 					voteCompleted = CheckAndFire(currentVote);
 				}
@@ -310,7 +310,7 @@ namespace KDFCommands {
 				voteAdded = true;
 				currentVote.Voters.Add(invoker);
 				votesChanged = true;
-				_client.SendChannelMessage($"{ClientUtility.GetClientNameFromUid(_ts3FullClient, invoker)} started vote for \"{command}\" ({currentVote.Voters.Count} votes of {Needed})");
+				client.SendChannelMessage($"{ClientUtility.GetClientNameFromUid(ts3FullClient, invoker)} started vote for \"{command}\" ({currentVote.Voters.Count} votes of {Needed})");
 				voteCompleted = CheckAndFire(currentVote);
 			}
 

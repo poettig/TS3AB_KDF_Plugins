@@ -24,6 +24,14 @@ namespace KDFCommands {
 			}
 		}
 
+		public class AutoFillEventArgs : EventArgs {
+			public JsonValue<AutofillStatus> status;
+			
+			public AutoFillEventArgs(JsonValue<AutofillStatus> status) {
+				this.status = status;
+			}
+		}
+
 		private AutoFillData AutofillData { get; set; }
 
 		private bool AutofillEnabled => AutofillData != null;
@@ -37,6 +45,8 @@ namespace KDFCommands {
 		private PlaylistManager PlaylistManager { get; }
 		public TsFullClient Ts3FullClient { get; }
 
+		public event EventHandler<AutoFillEventArgs> OnStateChange;
+		
 		public Autofill(
 			Ts3Client ts3Client,
 			Player player,
@@ -95,6 +105,7 @@ namespace KDFCommands {
 		public void Disable() {
 			Log.Trace("Autofill: Disabled.");
 			AutofillData = null;
+			OnStateChange?.Invoke(this, new AutoFillEventArgs(Status()));
 		}
 
 		public void DisableAndRemoveShadow() {
@@ -253,6 +264,8 @@ namespace KDFCommands {
 						AutofillData.Playlists = new HashSet<string>(playlistIds);
 						AutofillData.IssuerUid = uid;
 						DrawNextSong();
+						
+						OnStateChange?.Invoke(this, new AutoFillEventArgs(Status()));
 					} else {
 						// Else, disable autofill
 						Log.Info("Autofill: Disabled by command.");
@@ -272,6 +285,7 @@ namespace KDFCommands {
 						AutofillData.IssuerUid = uid;
 					}
 
+					OnStateChange?.Invoke(this, new AutoFillEventArgs(Status()));
 					Log.Trace("Autofill: Changed active playlists.");
 					DrawNextSong();
 				}
@@ -289,10 +303,11 @@ namespace KDFCommands {
 					AutofillData.Playlists = null;
 				}
 
+				OnStateChange?.Invoke(this, new AutoFillEventArgs(Status()));
 				Log.Info("Autofill: Enabled.");
 				DrawNextSong();
 			}
-
+			
 			if (!ShouldStayActive()) {
 				Log.Info("Autofill: Disabled (should not stay active).");
 				DisableAndRemoveShadow();

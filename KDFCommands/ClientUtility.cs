@@ -1,13 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using NLog.Fluent;
 using TS3AudioBot;
-using TS3AudioBot.Audio;
 using TS3AudioBot.CommandSystem;
-using TS3AudioBot.Playlists;
-using TS3AudioBot.ResourceFactories;
-using TS3AudioBot.Web.Model;
 using TSLib;
 using TSLib.Full;
 using TSLib.Full.Book;
@@ -21,6 +16,10 @@ namespace KDFCommands {
 		}
 		
 		public static IEnumerable<Client> GetListeningClients(Ts3Client ts3Client, TsFullClient ts3FullClient) {
+			if (ts3FullClient.Book.CurrentChannel() == null) {
+				return new List<Client>();
+			} 
+			
 			return GetClientsInChannel(ts3FullClient, ts3FullClient.Book.CurrentChannel().Id)
 				.Where(currentClient => {
 					if (ts3FullClient.ClientId == currentClient.Id) // exclude bot
@@ -50,7 +49,7 @@ namespace KDFCommands {
 		}
 
 		public static void SendMessage(Ts3Client client, ClientCall cc, string message) {
-			if (cc == null || !cc.ClientId.HasValue)
+			if (cc?.ClientId == null)
 				return;
 			client.SendMessage(message, cc.ClientId.Value);
 		}

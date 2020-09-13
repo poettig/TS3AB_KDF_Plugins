@@ -8,18 +8,15 @@ using System.Threading;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 using TS3AudioBot;
 using TS3AudioBot.Audio;
 using TS3AudioBot.CommandSystem;
-using TS3AudioBot.CommandSystem.Text;
 using TS3AudioBot.Config;
 using TS3AudioBot.Plugins;
 using TS3AudioBot.Playlists;
 using TS3AudioBot.ResourceFactories;
 using TS3AudioBot.Helper;
 using TS3AudioBot.Localization;
-using TS3AudioBot.Sessions;
 using TS3AudioBot.Web.Api;
 using TSLib;
 using TSLib.Full;
@@ -27,7 +24,7 @@ using TSLib.Helper;
 
 namespace KDFCommands {
 	public class KDFCommandsPlugin : IBotPlugin {
-		private static readonly NLog.Logger Log = NLog.LogManager.GetCurrentClassLogger();
+		internal static readonly NLog.Logger Log = NLog.LogManager.GetCurrentClassLogger();
 
 		internal static ICommandBag Bag { get; } = new CommandsBag();
 
@@ -61,7 +58,8 @@ namespace KDFCommands {
 			TsFullClient tsFullClient,
 			string query,
 			string target = null,
-			bool silent = false
+			bool silent = false,
+			Dictionary<string, string> additionalData = null
 		);
 
 		private readonly Player player;
@@ -75,9 +73,10 @@ namespace KDFCommands {
 		private readonly ConfPlugins confPlugins;
 
 		private Voting Voting { get; set; }
-		private Autofill Autofill { get; set; }
+		internal Autofill Autofill { get; set; }
 		private Description Description { get; set; }
-		private TwitchInfoUpdater TwitchInfoUpdater { get; set; }
+		internal TwitchInfoUpdater TwitchInfoUpdater { get; set; }
+		private UpdateWebSocket UpdateWebSocket { get; set; }
 
 		public KDFCommandsPlugin(
 			Player player,
@@ -89,6 +88,7 @@ namespace KDFCommands {
 			ConfBot confBot,
 			ConfPlugins confPlugins,
 			Bot bot) {
+			
 			this.player = player;
 			this.playManager = playManager;
 			this.playlistManager = playlistManager;
@@ -110,6 +110,7 @@ namespace KDFCommands {
 			Voting = new Voting(ts3Client, ts3FullClient, confBot);
 			Autofill = new Autofill(ts3Client, player, playManager, playlistManager, ts3FullClient);
 			Description = new Description(player, ts3Client, playManager);
+			UpdateWebSocket = new UpdateWebSocket(this, player, playManager, playlistManager, ts3Client, ts3FullClient, confBot.WebSocket);
 		}
 
 		public void Dispose() {
@@ -119,6 +120,7 @@ namespace KDFCommands {
 
 			Description.Dispose();
 			Autofill.DisableAndRemoveShadow();
+			UpdateWebSocket.Dispose();
 
 			Voting.CancelAll();
 		}
@@ -138,7 +140,9 @@ namespace KDFCommands {
 
 			if (e.PlayResource.BaseData.AudioType == "twitch") {
 				// Start twitch info collector
-				TwitchInfoUpdater = new TwitchInfoUpdater(confPlugins, e.PlayResource.BaseData.ResourceId);					
+				Log.Info("Start twitch update collector.");
+				TwitchInfoUpdater = new TwitchInfoUpdater(confPlugins, e.PlayResource.BaseData.ResourceId);
+				TwitchInfoUpdater.OnTwitchInfoChanged += UpdateWebSocket.TwitchInfoChanged;
 			} else if (TwitchInfoUpdater != null) {
 				TwitchInfoUpdater.Dispose();
 				TwitchInfoUpdater = null;
@@ -443,7 +447,9 @@ namespace KDFCommands {
 			TsFullClient ts3FullClient,
 			string url,
 			string target = null,
-			bool silent = false) {
+			bool silent = false,
+			Dictionary<string, string> additionalData = null) {
+			
 			R<PlayResource, LocalStr> resource;
 			if (silent) {
 				resource = resolver.Load(url);
@@ -485,7 +491,8 @@ namespace KDFCommands {
 			TsFullClient ts3FullClient,
 			string query,
 			string target = null,
-			bool silent = false) {
+			bool silent = false,
+			Dictionary<string, string> additionalData = null) {
 
 			IList<AudioResource> result;
 			if (silent) {
@@ -614,13 +621,20 @@ namespace KDFCommands {
 			TsFullClient ts3FullClient,
 			string url,
 			string target = null,
-			bool silent = false) {
+			bool silent = false,
+			Dictionary<string, string> additionalData = null) {
 
 			int index;
 			string title;
 			try {
 				var playResource = resolver.Load(url).UnwrapThrow();
-				title = playResource.BaseData.ResourceTitle; 
+				title = playResource.BaseData.ResourceTitle;
+				if (additionalData != null) {
+					foreach (var (key, value) in additionalData) {
+						playResource.BaseData.AdditionalData.TryAdd(key, value);
+					}
+				}
+
 				var r = MainCommands.ListAddItem(playlistManager, info, target, playResource.BaseData);
 				if (!r.Ok) {
 					ClientUtility.SendMessage(ts3Client, cc, "Error occured for '" + url + "': Already contained in the playlist");
@@ -641,7 +655,7 @@ namespace KDFCommands {
 			return null;
 		}
 
-		private static string ListAddQuery(
+		internal static string ListAddQuery(
 			PlaylistManager playlistManager,
 			PlayManager playManager,
 			ExecutionInformation info,
@@ -652,7 +666,8 @@ namespace KDFCommands {
 			TsFullClient ts3FullClient,
 			string query,
 			string target = null,
-			bool silent = false) {
+			bool silent = false,
+			Dictionary<string, string> additionalData = null) {
 
 			var result = resolver.Search("youtube", query);
 			if (!result.Ok) {
@@ -661,6 +676,12 @@ namespace KDFCommands {
 			}
 
 			AudioResource audioResource = result.Value[0];
+			if (additionalData != null) {
+				foreach (var (key, value) in additionalData) {
+					audioResource.AdditionalData.TryAdd(key, value);
+				}
+			}
+			
 			int index;
 			try {
 				var r = MainCommands.ListAddItem(playlistManager, info, target, audioResource);
@@ -812,6 +833,9 @@ namespace KDFCommands {
 
 			[JsonProperty(PropertyName = "UserId")]
 			public string UserId { get; set; }
+			
+			[JsonProperty(PropertyName = "UserName")]
+			public string UserName { get; set; }
 
 			[JsonProperty(PropertyName = "ContainingListId")]
 			public string ContainingListId { get; set; }
@@ -856,11 +880,12 @@ namespace KDFCommands {
 			return output.ToString();
 		}
 
-		private static QueueItemInfo ToQueueItemInfo(QueueItem qi, bool restrict) {
+		private QueueItemInfo ToQueueItemInfo(QueueItem qi, bool restrict) {
 			return new QueueItemInfo {
 				ContainingListId = qi.MetaData.ContainingPlaylistId,
 				Title = restrict ? null : qi.AudioResource.ResourceTitle,
 				UserId = qi.MetaData.ResourceOwnerUid.GetValueOrDefault(Uid.Null).Value,
+				UserName = ClientUtility.GetClientNameFromUid(ts3FullClient, qi.MetaData.ResourceOwnerUid.GetValueOrDefault(Uid.Null)),
 				ResourceId = qi.AudioResource.ResourceId
 			};
 		}
@@ -868,30 +893,28 @@ namespace KDFCommands {
 		[Command("queuewithuid")]
 		public JsonValue<CurrentQueueInfo> CommandQueueWithUid(
 			ExecutionInformation info,
-			InvokerData invoker,
 			string uidStr) {
 
 			// If the uid is garbage, the queue will be completely hidden.
-			return CommandQueueInternal(info, Uid.To(uidStr), uidStr);
+			return CommandQueueInternal(Uid.To(uidStr), info, uidStr);
 		}
 
 		[Command("queue")]
 		public JsonValue<CurrentQueueInfo> CommandQueue(
-			ExecutionInformation info,
 			InvokerData invoker,
+			ExecutionInformation info,
 			string arg = null) {
-			return CommandQueueInternal(info, invoker.ClientUid, arg);
+			return CommandQueueInternal(invoker.ClientUid, info, arg);
 		}
 
-		private JsonValue<CurrentQueueInfo> CommandQueueInternal(
-			ExecutionInformation info, Uid uid, string arg = null) {
-			bool restricted = arg != "full";
-			if (!restricted && !info.HasRights(RightOverrideQueueCommandCheck))
+		public JsonValue<CurrentQueueInfo> CommandQueueInternal(Uid uid, ExecutionInformation info = null, string arg = null) {
+			bool hideSongsOfOthers = arg != "full";
+			if (!hideSongsOfOthers && (info == null || !info.HasRights(RightOverrideQueueCommandCheck)))
 				throw new CommandException("You have no permission to view the full queue.",
 					CommandExceptionReason.CommandError);
 			var queueInfo = new CurrentQueueInfo();
 			lock (playManager) {
-				bool ShouldRestrict(QueueItem qi) => restricted && qi.MetaData.ResourceOwnerUid != uid;
+				bool ShouldRestrict(QueueItem qi) => hideSongsOfOthers && qi.MetaData.ResourceOwnerUid != uid;
 				queueInfo.Items = playManager.Queue.Items.Skip(playManager.Queue.Index + 1)
 					.Select(qi => ToQueueItemInfo(qi, ShouldRestrict(qi))).ToList();
 				if (playManager.IsPlaying)
@@ -1200,8 +1223,8 @@ namespace KDFCommands {
 				}
 			}
 
-			var streamInfo = TwitchInfoUpdater.StreamInfo.Data[0];
-			var streamerInfo = TwitchInfoUpdater.StreamerInfo.Data[0];
+			var streamInfo = TwitchInfoUpdater?.StreamInfo?.Data[0];
+			var streamerInfo = TwitchInfoUpdater?.StreamerInfo?.Data[0];
 
 			if (streamInfo == null) {
 				throw new CommandException("Missing StreamInfo for some reason.", CommandExceptionReason.MissingContext);
@@ -1226,13 +1249,14 @@ namespace KDFCommands {
 		
 		[Command("listeners")]
 		public static JsonValue<Dictionary<string, IList<string>>> CommandListeners(Ts3Client ts3Client, TsFullClient ts3FullClient, Player player) {
-			return JsonValue.Create(new Dictionary<string, IList<string>> {
-				{ "websocket", player.WebSocketPipe.Listeners },
-				{ "channel", ClientUtility.GetListeningClients(ts3Client, ts3FullClient)
+			var channelListeners = ClientUtility.GetListeningClients(ts3Client, ts3FullClient)
 					.Where(client => !player.WebSocketPipe.Listeners.Contains(client.Uid.ToString()))
 					.Select(client => ClientUtility.GetClientNameFromUid(ts3FullClient, client.Uid))
-					.ToList()
-				}	
+					.ToList();
+
+			return JsonValue.Create(new Dictionary<string, IList<string>> {
+				{ "websocket", player.WebSocketPipe.Listeners },
+				{ "channel", channelListeners }	
 			}, data => $"Via Website: {data["websocket"]}, In Channel: {data["channel"]}");
 		}
 
@@ -1244,6 +1268,14 @@ namespace KDFCommands {
 
 			var randomSongs = SongRandomizer.GetRandomSongs(count, playlistManager);
 			return new JsonArray<SongRandomizerResult>(randomSongs);
+		}
+		
+		[Command("youtubestream")]
+		public static string CommandYoutubeStream(PlayManager playManager, ResolveContext resolver, ClientCall cc, string url) {
+			var resource = resolver.Load(url).UnwrapThrow();
+			var newResource = resource.BaseData.WithGain(0);
+			playManager.Enqueue(newResource, new MetaData(cc.ClientUid)).UnwrapThrow();
+			return ComposeAddMessage(playManager);
 		}
 			
 		public class TwitchInfo {
