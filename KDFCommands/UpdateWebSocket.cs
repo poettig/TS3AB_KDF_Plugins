@@ -62,7 +62,12 @@ namespace KDFCommands {
 					// Check for listener change
 					var newListeners = KDFCommandsPlugin.CommandListeners(ts3Client, ts3FullClient, player);
 					if (listeners == null || !ListenersEqual(listeners, newListeners)) {
-						SendToAll("listeners", newListeners.Serialize());
+						var translated = new Dictionary<string, IList<string>>();
+						foreach (var (key, value) in newListeners.Value) {
+							var list = value.Select(entry => ClientUtility.GetClientNameFromUid(ts3FullClient, Uid.To(entry))).ToList();
+							translated[key] = list;
+						}
+						SendToAll("listeners", JsonValue.Create(translated).Serialize());
 					}
 					listeners = newListeners;
 					
