@@ -180,6 +180,21 @@ namespace KDFCommands {
 			SendListenerUpdate(KDFCommandsPlugin.CommandListeners(ts3Client, ts3FullClient, player), e.Client);
 			SendToClient(e.Client, "queue", kdf.CommandQueueInternal(Uid.To(e.Client.Uid)).Serialize());
 			SendToClient(e.Client, "recentlyplayed", kdf.CommandRecentlyPlayed(playManager, 50).Serialize());
+
+			var updater = kdf.TwitchInfoUpdater;
+			if (
+				updater != null &&
+				updater.StreamerInfo != null &&
+				updater.StreamInfo != null &&
+				updater.StreamerInfo.Data != null &&
+				updater.StreamInfo.Data != null && 
+				updater.StreamerInfo.Data.Length != 0 &&
+				updater.StreamInfo.Data.Length != 0
+			) {
+				var streamerInfo = updater.StreamerInfo.Data[0];
+				var streamInfo = updater.StreamInfo.Data[0];
+				SendToClient(e.Client, "twitchinfo", CreateTwitchInfoUpdate(streamerInfo, streamInfo).Serialize());
+			}
 		}
 		
 		private void AutofillChanged(object sender, Autofill.AutoFillEventArgs e) {
@@ -198,7 +213,11 @@ namespace KDFCommands {
 			
 			var streamerInfo = e.StreamerInfo.Data[0];
 			var streamInfo = e.StreamInfo.Data[0];
-			var value = JsonValue.Create(new KDFCommandsPlugin.TwitchInfo {
+			SendToAll("twitchinfo", CreateTwitchInfoUpdate(streamerInfo, streamInfo).Serialize());
+		}
+
+		private JsonValue<KDFCommandsPlugin.TwitchInfo> CreateTwitchInfoUpdate(StreamerData streamerInfo, StreamData streamInfo) {
+			return JsonValue.Create(new KDFCommandsPlugin.TwitchInfo {
 				ViewerCount = streamInfo.ViewerCount,
 				Uptime = DateTimeOffset.UtcNow.ToUnixTimeSeconds() - streamInfo.StartedAt.ToUnix(),
 				ThumbnailUrl = streamInfo.ThumbnailUrl,
@@ -207,7 +226,6 @@ namespace KDFCommands {
 				StreamerLogin = streamerInfo.Login,
 				StreamTitle = streamInfo.Title
 			});
-			SendToAll("twitchinfo", value.Serialize());
 		}
 		
 		private void SendToAll(string type, string message) {
