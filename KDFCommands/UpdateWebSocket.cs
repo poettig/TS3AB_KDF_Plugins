@@ -46,7 +46,7 @@ namespace KDFCommands {
 			this.ts3FullClient = ts3FullClient;
 
 			this.playManager.Queue.OnQueueChange += QueueChanged;
-			this.playManager.ResourceStopped += ResourceStopped;
+			this.playManager.PlaybackStopped += UpdateRecentlyPlayed;
 			this.kdf.Autofill.OnStateChange += AutofillChanged;
 
 			server = new WebSocketServer(IPAddress.Loopback, 2021, confWebSocket);
@@ -169,12 +169,7 @@ namespace KDFCommands {
 			}
 		}
 
-		private void ResourceStopped(object sender, SongEndEventArgs e) {
-			// Only react to the event that is generated after CurrentPlayData got null'd
-			if (!e.Stopped) {
-				return;
-			}
-			
+		private void UpdateRecentlyPlayed(object sender, EventArgs _) {
 			SendToAll( "recentlyplayed", kdf.CommandRecentlyPlayed(playManager, 50).Serialize());
 		}
 
@@ -275,7 +270,7 @@ namespace KDFCommands {
 
 		public void Dispose() {
 			playManager.Queue.OnQueueChange -= QueueChanged;
-			playManager.ResourceStopped -= ResourceStopped;
+			playManager.PlaybackStopped -= UpdateRecentlyPlayed;
 			kdf.Autofill.OnStateChange -= AutofillChanged;
 			server.OnClientConnected -= ClientConnected;
 			
