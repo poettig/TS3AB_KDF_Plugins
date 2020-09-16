@@ -57,6 +57,7 @@ namespace KDFCommands {
 				JsonValue<Dictionary<string, IList<string>>> listeners = null;
 				JsonValue<SongInfo> song = null;
 				bool frozen = false;
+				long frozenSince = -1;
 				
 				while (running) {
 					// Check for listener change
@@ -79,6 +80,7 @@ namespace KDFCommands {
 						bool frozenStateChanged = ts - player.WebSocketPipe.LastDataSentTimestamp > 500 != frozen;
 						if (frozenStateChanged) {
 							frozen = !frozen;
+							frozenSince = frozen ? DateTimeOffset.Now.ToUnixTimeSeconds() : -1;
 						}
 
 						if (
@@ -101,6 +103,12 @@ namespace KDFCommands {
 								Log.Trace("Song update sent. Reason: " + reason);
 							}
 
+							SendSongUpdate(newSong);
+						}
+
+						// Send resync update if frozen every 5 seconds.
+						if (frozen && (DateTimeOffset.Now.ToUnixTimeSeconds() - frozenSince) % 5 == 4) {
+							Log.Trace("Song update sent. Reason: Update in frozen state.");
 							SendSongUpdate(newSong);
 						}
 					} else if (song != null) {
@@ -175,11 +183,13 @@ namespace KDFCommands {
 			try {
 				SendSongUpdate(MainCommands.CommandSong(playManager, player, ts3FullClient), e.Client);
 			} catch (CommandException) {
-				// Don't crash just because nothing is playing
+				// Nothing playing
+				SendToClient(e.Client, "song", null);
 			}
 			SendListenerUpdate(KDFCommandsPlugin.CommandListeners(ts3Client, ts3FullClient, player), e.Client);
 			SendToClient(e.Client, "queue", kdf.CommandQueueInternal(Uid.To(e.Client.Uid)).Serialize());
 			SendToClient(e.Client, "recentlyplayed", kdf.CommandRecentlyPlayed(playManager, 50).Serialize());
+			SendToClient(e.Client, "autofill", kdf.Autofill.Status().Serialize());
 
 			var updater = kdf.TwitchInfoUpdater;
 			if (
