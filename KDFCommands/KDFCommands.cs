@@ -896,7 +896,7 @@ namespace KDFCommands {
 			string uidStr) {
 
 			// If the uid is garbage, the queue will be completely hidden.
-			return CommandQueueInternal(Uid.To(uidStr), info, uidStr);
+			return CommandQueueInternal(Uid.To(uidStr), info);
 		}
 
 		[Command("queue")]

@@ -3,8 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Threading;
-using Newtonsoft.Json;
-using NLog;
 using TS3AudioBot;
 using TS3AudioBot.Audio;
 using TS3AudioBot.CommandSystem;
@@ -48,26 +46,23 @@ namespace KDFCommands {
 			this.ts3FullClient = ts3FullClient;
 
 			this.playManager.Queue.OnQueueChange += QueueChanged;
+			this.playManager.ResourceStopped += ResourceStopped;
 			this.kdf.Autofill.OnStateChange += AutofillChanged;
 
 			server = new WebSocketServer(IPAddress.Loopback, 2021, confWebSocket);
+			server.OnClientConnected += ClientConnected;
 
 			running = true;
 			var thread = new Thread(() => {
 				JsonValue<Dictionary<string, IList<string>>> listeners = null;
 				JsonValue<SongInfo> song = null;
-				uint songFrozen = 0;
+				bool frozen = false;
 				
 				while (running) {
 					// Check for listener change
 					var newListeners = KDFCommandsPlugin.CommandListeners(ts3Client, ts3FullClient, player);
 					if (listeners == null || !ListenersEqual(listeners, newListeners)) {
-						var translated = new Dictionary<string, IList<string>>();
-						foreach (var (key, value) in newListeners.Value) {
-							var list = value.Select(entry => ClientUtility.GetClientNameFromUid(ts3FullClient, Uid.To(entry))).ToList();
-							translated[key] = list;
-						}
-						SendToAll("listeners", JsonValue.Create(translated).Serialize());
+						SendListenerUpdate(newListeners);
 					}
 					listeners = newListeners;
 					
@@ -78,16 +73,21 @@ namespace KDFCommands {
 					} catch (CommandException) {
 						// Don't crash just because nothing is playing
 					}
-
+					
 					if (newSong != null) {
+						var ts = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+						bool frozenStateChanged = ts - player.WebSocketPipe.LastDataSentTimestamp > 500 != frozen;
+						if (frozenStateChanged) {
+							frozen = !frozen;
+						}
+
 						if (
 							song == null ||
 							newSong.Value.Position < song.Value.Position ||
 							newSong.Value.Length != song.Value.Length ||
 							newSong.Value.Link != song.Value.Link ||
-							newSong.Value.Paused != song.Value.Paused || 
-							// Song not frozen anymore. Only sent update when frozen for at least 2 cycles.
-							songFrozen > 1 && newSong.Value.Position - song.Value.Position > TimeSpan.FromMilliseconds(750)
+							newSong.Value.Paused != song.Value.Paused ||
+							frozenStateChanged && !frozen
 						) {
 							if (Log.IsTraceEnabled) {
 								string reason = "Unexpected reason.";
@@ -96,30 +96,19 @@ namespace KDFCommands {
 								else if (newSong.Value.Length != song.Value.Length) reason = "Length changed.";
 								else if (newSong.Value.Link != song.Value.Link) reason = "Resource URL changed.";
 								else if (newSong.Value.Paused != song.Value.Paused) reason = "Pause state changed.";
-								else if (songFrozen > 1 && newSong.Value.Position - song.Value.Position > TimeSpan.FromMilliseconds(750)) reason = "Song unfroze.";
+								else if (frozenStateChanged & !frozen) reason = "Song was frozen for over 500ms and now unfroze.";
 
 								Log.Trace("Song update sent. Reason: " + reason);
 							}
 
-							SendToAll("song", newSong.Serialize());
-							songFrozen = 0;
-						}
-
-						if (
-							song != null &&
-							songFrozen != 0 &&
-							!newSong.Value.Paused &&
-							newSong.Value.Position - song.Value.Position < TimeSpan.FromMilliseconds(250)
-						) {
-							// Song did not advance a second
-							Log.Trace("Song frozen.");
-							songFrozen++;
+							SendSongUpdate(newSong);
 						}
 					} else if (song != null) {
 						// newSong is null but previous song was not --> music stopped
 						SendToAll("song", null);
-						Log.Trace("Song update sent. Reason: Music stopped");
+						Log.Trace("Song update sent. Reason: Music stopped.");
 					}
+
 					song = newSong;
 
 					Thread.Sleep(1000);
@@ -130,12 +119,69 @@ namespace KDFCommands {
 			thread.Start();
 		}
 
+		private void SendListenerUpdate(JsonValue<Dictionary<string, IList<string>>> newListeners, WebSocketConnection client = null) {
+			var translated = TranslateUidsToNames(newListeners);
+			if (client != null) {
+				SendToClient(client, "listeners", JsonValue.Create(translated).Serialize());
+			} else {
+				SendToAll("listeners", JsonValue.Create(translated).Serialize());
+			}
+		}
+		
+		private void SendSongUpdate(JsonValue<SongInfo> newSong, WebSocketConnection client = null) {
+			// Add Issuer Name
+			newSong.Value.IssuerName = TryTranslateUidToName(newSong.Value.IssuerUid);
+			
+			if (client != null) {
+				SendToClient(client, "song", newSong.Serialize());
+			} else {
+				SendToAll("song", newSong.Serialize());
+			}
+		}
+
+		private Dictionary<string, IList<string>> TranslateUidsToNames(JsonValue<Dictionary<string, IList<string>>> newListeners) {
+			var translated = new Dictionary<string, IList<string>>();
+			foreach (var (key, value) in newListeners.Value) {
+				translated[key] = new List<string>();		
+				foreach (var entry in value) {
+					translated[key].Add(TryTranslateUidToName(entry));
+				}
+			}
+
+			return translated;
+		}
+
+		private string TryTranslateUidToName(string uid) {
+			return Uid.IsValid(uid) ? ClientUtility.GetClientNameFromUid(ts3FullClient, Uid.To(uid)) : uid;
+		}
+
 		private void QueueChanged(object sender, EventArgs _) {
 			foreach (var (_, value) in server.ConnectedClients) {
 				SendToClient(value, "queue", kdf.CommandQueueInternal(Uid.To(value.Uid)).Serialize());
 			}
 		}
 
+		private void ResourceStopped(object sender, SongEndEventArgs e) {
+			// Only react to the event that is generated after CurrentPlayData got null'd
+			if (!e.Stopped) {
+				return;
+			}
+			
+			SendToAll( "recentlyplayed", kdf.CommandRecentlyPlayed(playManager, 50).Serialize());
+		}
+
+		private void ClientConnected(object sender, ClientConnectedEventArgs e) {
+			// Send all initial info necessary
+			try {
+				SendSongUpdate(MainCommands.CommandSong(playManager, player, ts3FullClient), e.Client);
+			} catch (CommandException) {
+				// Don't crash just because nothing is playing
+			}
+			SendListenerUpdate(KDFCommandsPlugin.CommandListeners(ts3Client, ts3FullClient, player), e.Client);
+			SendToClient(e.Client, "queue", kdf.CommandQueueInternal(Uid.To(e.Client.Uid)).Serialize());
+			SendToClient(e.Client, "recentlyplayed", kdf.CommandRecentlyPlayed(playManager, 50).Serialize());
+		}
+		
 		private void AutofillChanged(object sender, Autofill.AutoFillEventArgs e) {
 			SendToAll("autofill", e.status.Serialize());
 		}
@@ -163,7 +209,7 @@ namespace KDFCommands {
 			});
 			SendToAll("twitchinfo", value.Serialize());
 		}
-
+		
 		private void SendToAll(string type, string message) {
 			foreach (var pair in server.ConnectedClients) {
 				SendToClient(pair.Value, type, message);
@@ -201,7 +247,10 @@ namespace KDFCommands {
 
 		public void Dispose() {
 			playManager.Queue.OnQueueChange -= QueueChanged;
+			playManager.ResourceStopped -= ResourceStopped;
 			kdf.Autofill.OnStateChange -= AutofillChanged;
+			server.OnClientConnected -= ClientConnected;
+			
 			server.Dispose();
 			running = false;
 		}
