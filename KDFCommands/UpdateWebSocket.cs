@@ -46,7 +46,7 @@ namespace KDFCommands {
 			this.ts3FullClient = ts3FullClient;
 
 			this.playManager.Queue.OnQueueChange += QueueChanged;
-			this.playManager.PlaybackStopped += UpdateRecentlyPlayed;
+			this.playManager.Queue.OnQueueIndexChange += UpdateRecentlyPlayed;
 			this.kdf.Autofill.OnStateChange += AutofillChanged;
 
 			server = new WebSocketServer(IPAddress.Loopback, 2021, confWebSocket);
@@ -270,7 +270,7 @@ namespace KDFCommands {
 
 		public void Dispose() {
 			playManager.Queue.OnQueueChange -= QueueChanged;
-			playManager.PlaybackStopped -= UpdateRecentlyPlayed;
+			playManager.Queue.OnQueueIndexChange -= UpdateRecentlyPlayed;
 			kdf.Autofill.OnStateChange -= AutofillChanged;
 			server.OnClientConnected -= ClientConnected;
 			
