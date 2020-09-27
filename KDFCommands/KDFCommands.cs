@@ -1261,12 +1261,13 @@ namespace KDFCommands {
 		}
 
 		[Command("randomsongs")]
-		public static JsonArray<SongRandomizerResult> CommandRandomSongs(PlaylistManager playlistManager, int count) {
+		public static JsonArray<SongRandomizerResult> CommandRandomSongs(PlaylistManager playlistManager, int count, string[] playlists = null) {
 			if (count <= 0) {
 				throw new CommandException("You cannot randomize 0 or less songs.", CommandExceptionReason.CommandError);
 			}
 
-			var randomSongs = SongRandomizer.GetRandomSongs(count, playlistManager);
+			var playlistsHashMap = playlists != null && playlists.Length != 0 ? new HashSet<string>(playlists) : null;
+			var randomSongs = SongRandomizer.GetRandomSongs(count, playlistManager, playlistsHashMap);
 			return new JsonArray<SongRandomizerResult>(randomSongs);
 		}
 		

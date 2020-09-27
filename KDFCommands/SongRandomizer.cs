@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using TS3AudioBot.CommandSystem;
 using TS3AudioBot.Helper;
 using TS3AudioBot.Playlists;
@@ -60,7 +61,7 @@ namespace KDFCommands {
 				playlists.Add(playlist);
 				numSongs += playlist.SongCount;
 			}
-
+			
 			var randomSongs = new List<SongRandomizerResult>();
 			for (var i = 0; i < count; i++) {
 				// Draw random song number
