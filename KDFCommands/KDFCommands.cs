@@ -77,6 +77,7 @@ namespace KDFCommands {
 		private Description Description { get; set; }
 		internal TwitchInfoUpdater TwitchInfoUpdater { get; set; }
 		private UpdateWebSocket UpdateWebSocket { get; set; }
+		private Thread recalcGainThread;
 
 		public KDFCommandsPlugin(
 			Player player,
@@ -1284,6 +1285,91 @@ namespace KDFCommands {
 			return ComposeAddMessage(playManager);
 		}
 
+		[Command("recalcgain")]
+		public void CommandRecalculateGain(ResolveContext resolver) {
+			const string flagKey = "fully_analysed";
+			string postponeMarker = $"postponed_{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}"; 
+		
+			// Already running.
+			if (recalcGainThread != null) {
+				return;
+			}
+		
+			recalcGainThread = new Thread(() => {
+				foreach (var info in playlistManager.GetAvailablePlaylists()) {
+					var continueCurrentPlaylist = true;
+					while (continueCurrentPlaylist) {
+						// Lock the playlist during iteration so that the index of the modified entry cannot change.
+						playlistManager.ModifyPlaylist(info.Id, editor => {
+							// Get playlist.
+							var playlistOption = playlistManager.GetPlaylist(info.Id);
+							if (!playlistOption.Ok) {
+								Log.Error($"Failed to fetch playlist {info.Id}.");
+								continueCurrentPlaylist = false;
+								return;
+							}
+		
+							// Find candidate that is not fully analyzed yet.
+							AudioResource candidate = null;
+							int candidateIndex = 0;
+							var (currentPlaylist, currentListId) = playlistOption.Value;
+							for (var i = 0; i < currentPlaylist.Count; i++) {
+								var currentResource = currentPlaylist[i];
+								if (
+									currentResource.AdditionalData == null
+									|| !currentResource.AdditionalData.ContainsKey(flagKey)
+									|| (currentResource.AdditionalData[flagKey] != "true" &&
+									    currentResource.AdditionalData[flagKey] != postponeMarker)
+								) {
+									candidate = currentResource;
+									candidateIndex = i;
+									break;
+								}
+							}
+		
+							// No candidate found, go to next playlist.
+							if (candidate == null) {
+								continueCurrentPlaylist = false;
+								return;
+							}
+		
+							// Add additional data if it does not exist yet.
+							if (candidate.AdditionalData == null) {
+								candidate = candidate.WithNewAdditionalData();
+							}
+		
+							// Resolve the resource to an analyzable URL.
+							var playResourceOption = resolver.Load(candidate);
+							if (!playResourceOption.Ok) {
+								Log.Warn($"Problem resolving resource '{candidate.ResourceTitle}': {playResourceOption.Error}");
+		
+								// Mark as postponed so that the loop does not hang forever on a broken playlist entry.
+								candidate.AdditionalData[flagKey] = postponeMarker;
+								editor.ChangeItemAt(candidateIndex, candidate);
+								return;
+							}
+		
+							// Analyse the resource fully.
+							var gain = player.FfmpegProducer.VolumeDetect(playResourceOption.Value.PlayUri,
+								new CancellationToken(), true);
+							candidate = candidate.WithGain(gain);
+							candidate.AdditionalData[flagKey] = "true";
+							editor.ChangeItemAt(candidateIndex, candidate);
+		
+							Log.Error($"Finished full analysis of '{candidate.ResourceTitle}' in {currentListId}, index {candidateIndex}.");
+						});
+					}
+				}
+			}) {
+				IsBackground = true
+			};
+			recalcGainThread.Start();
+			recalcGainThread.Join();
+			recalcGainThread = null;
+			
+			Log.Info("Recalculation of gain values done.");
+		}
+			
 		public class TwitchInfo {
 			[JsonProperty("ViewerCount")]
 			public long ViewerCount { get; set; }
