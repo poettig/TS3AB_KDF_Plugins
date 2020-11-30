@@ -47,7 +47,8 @@ namespace KDFCommands {
 
 			this.playManager.Queue.OnQueueChange += QueueChanged;
 			this.playManager.Queue.OnQueueIndexChange += UpdateRecentlyPlayed;
-			this.kdf.Autofill.OnStateChange += AutofillChanged;
+			this.kdf.Autofill.OnStateChange += AutofillChanged; 
+			this.kdf.Voting.OnSkipVoteChanged -= SkipVoteChanged;
 
 			server = new WebSocketServer(IPAddress.Loopback, 2021, confWebSocket);
 			server.OnClientConnected += ClientConnected;
@@ -173,6 +174,10 @@ namespace KDFCommands {
 			SendToAll( "recentlyplayed", kdf.CommandRecentlyPlayed(playManager, 50).Serialize());
 		}
 
+		private void SkipVoteChanged(object sender, Voting.SkipVoteEventArgs data) {
+			SendToAll("voteskip",  new JsonValue<Voting.Result>(data.Data).Serialize());
+		}
+
 		private void ClientConnected(object sender, ClientConnectedEventArgs e) {
 			// Send all initial info necessary
 			try {
@@ -186,6 +191,18 @@ namespace KDFCommands {
 			SendToClient(e.Client, "recentlyplayed", kdf.CommandRecentlyPlayed(playManager, 50).Serialize());
 			SendToClient(e.Client, "autofill", kdf.Autofill.Status().Serialize());
 
+			foreach (var (key, value) in kdf.Voting.CurrentVotes) {
+				if (key == "skip") {
+					SendToClient(e.Client, "voteskip", new JsonValue<Voting.Result>(new Voting.Result {
+						VoteAdded = false,
+						VoteComplete = false,
+						VotesChanged = false,
+						VoteCount = value.Voters.Count,
+						VotesNeeded = kdf.Voting.Needed
+					}).Serialize());
+				}
+			}
+			
 			var updater = kdf.TwitchInfoUpdater;
 			if (
 				updater != null &&
@@ -272,6 +289,7 @@ namespace KDFCommands {
 			playManager.Queue.OnQueueChange -= QueueChanged;
 			playManager.Queue.OnQueueIndexChange -= UpdateRecentlyPlayed;
 			kdf.Autofill.OnStateChange -= AutofillChanged;
+			kdf.Voting.OnSkipVoteChanged -= SkipVoteChanged;
 			server.OnClientConnected -= ClientConnected;
 			
 			server.Dispose();

@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using Newtonsoft.Json;
 using TS3AudioBot;
+using TS3AudioBot.Audio;
 using TS3AudioBot.CommandSystem;
 using TS3AudioBot.CommandSystem.Text;
 using TS3AudioBot.Config;
@@ -97,6 +98,14 @@ namespace KDFCommands {
 		private static readonly TimeSpan MinIdleTimeForVoteIgnore = TimeSpan.FromMinutes(10);
 		private static readonly NLog.Logger Log = NLog.LogManager.GetCurrentClassLogger();
 
+		public class SkipVoteEventArgs : EventArgs {
+			public readonly Result Data;
+			
+			public SkipVoteEventArgs(Result data) {
+				Data = data;
+			}
+		}
+		
 		public class CurrentVoteData {
 			public string Command { get; }
 			public Func<string> Executor { get; }
@@ -118,12 +127,16 @@ namespace KDFCommands {
 		private readonly List<CurrentVoteData> removeOnResourceEnded = new List<CurrentVoteData>();
 
 		public IReadOnlyDictionary<string, CurrentVoteData> CurrentVotes => currentVotes;
+		
+		public event EventHandler<SkipVoteEventArgs> OnSkipVoteChanged;
 
+		private readonly Player player;
 		private readonly Ts3Client client;
 		private readonly ConfBot config;
 		private readonly TsFullClient ts3FullClient;
 
-		public Voting(Ts3Client client, TsFullClient ts3FullClient, ConfBot config) {
+		public Voting(Player player, Ts3Client client, TsFullClient ts3FullClient, ConfBot config) {
+			this.player = player;
 			this.client = client;
 			this.config = config;
 			this.ts3FullClient = ts3FullClient;
@@ -186,7 +199,10 @@ namespace KDFCommands {
 			var clients = ClientUtility.GetClientsInChannel(ts3FullClient, channel.Id)
 				.Where(CheckClientIncludedInVote)
 				.Select(c => c.Uid);
-			UpdateNeededForUsers(clients.ToHashSet());
+			clients = clients.Concat(player.WebSocketPipe.Listeners.Select(Uid.To)).Distinct();
+			var clientList = clients.ToList();
+			Log.Trace("Relevant for voting: " + string.Join(", ", clientList.Select(uid => ClientUtility.GetClientNameFromUid(ts3FullClient, uid))));
+			UpdateNeededForUsers(clientList.ToHashSet());
 		}
 
 		public void CancelAll() {
@@ -314,13 +330,19 @@ namespace KDFCommands {
 				voteCompleted = CheckAndFire(currentVote);
 			}
 
-			return new Result {
+			var result = new Result {
 				VoteAdded = voteAdded,
 				VoteComplete = voteCompleted,
 				VotesChanged = votesChanged,
 				VoteCount = currentVote.Voters.Count,
 				VotesNeeded = Needed
 			};
+
+			if (currentVote.Command == "skip" && (voteAdded || votesChanged || voteCompleted)) {
+				OnSkipVoteChanged?.Invoke(this, new SkipVoteEventArgs(result));
+			}
+
+			return result;
 		}
 	}
 }

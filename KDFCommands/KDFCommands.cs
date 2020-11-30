@@ -72,7 +72,7 @@ namespace KDFCommands {
 		private readonly ConfBot confBot;
 		private readonly ConfPlugins confPlugins;
 
-		private Voting Voting { get; set; }
+		internal Voting Voting { get; set; }
 		internal Autofill Autofill { get; set; }
 		private Description Description { get; set; }
 		internal TwitchInfoUpdater TwitchInfoUpdater { get; set; }
@@ -107,7 +107,7 @@ namespace KDFCommands {
 			playManager.PlaybackStopped += PlaybackStopped;
 			playManager.ResourceStopped += OnResourceStopped;
 
-			Voting = new Voting(ts3Client, ts3FullClient, confBot);
+			Voting = new Voting(player, ts3Client, ts3FullClient, confBot);
 			Autofill = new Autofill(ts3Client, player, playManager, playlistManager, ts3FullClient);
 			Description = new Description(player, ts3Client, playManager);
 			UpdateWebSocket = new UpdateWebSocket(this, player, playManager, playlistManager, ts3Client, ts3FullClient, confBot.WebSocket);
@@ -511,6 +511,11 @@ namespace KDFCommands {
 					return null;
 				}
 				result = r.Value;
+			}
+
+			if (result.Count == 0) {
+				SendAddFailure(ts3Client, query, new LocalStr($"Youtube returned no results for query '{query}'"), cc);
+				return null;
 			}
 
 			AudioResource audioResource = result[0];
@@ -1169,10 +1174,10 @@ namespace KDFCommands {
 			string clientUid, string command, string? args = null) {
 			var uid = Uid.To(clientUid);
 
-			var botChannel = ts3FullClient.Book.CurrentChannel().Id;
-			var hasClientWithUidInBotChannel = ClientUtility.GetClientsByUidOnline(ts3FullClient, uid).Any(c => botChannel == c.Channel);
-			if (!hasClientWithUidInBotChannel)
-				ThrowNotInSameChannel();
+			// var botChannel = ts3FullClient.Book.CurrentChannel().Id;
+			// var hasClientWithUidInBotChannel = ClientUtility.GetClientsByUidOnline(ts3FullClient, uid).Any(c => botChannel == c.Channel);
+			// if (!hasClientWithUidInBotChannel)
+				// ThrowNotInSameChannel();
 
 			return CommandStartVote(info, uid, command, args);
 		}
@@ -1181,9 +1186,9 @@ namespace KDFCommands {
 		public JsonValue<Voting.Result> CommandStartVote(ExecutionInformation info, ClientCall invoker, string command, string? args = null) {
 			if (!invoker.ChannelId.HasValue)
 				throw new CommandException("Could not get user channel", CommandExceptionReason.InternalError);
-			var botChannel = ts3FullClient.Book.CurrentChannel().Id;
-			if (botChannel != invoker.ChannelId.Value)
-				ThrowNotInSameChannel();
+			// var botChannel = ts3FullClient.Book.CurrentChannel().Id;
+			// if (botChannel != invoker.ChannelId.Value)
+				// ThrowNotInSameChannel();
 
 			return CommandStartVote(info, invoker.ClientUid, command, args);
 		}
@@ -1278,7 +1283,7 @@ namespace KDFCommands {
 			playManager.Enqueue(newResource, new MetaData(cc.ClientUid)).UnwrapThrow();
 			return ComposeAddMessage(playManager);
 		}
-			
+
 		public class TwitchInfo {
 			[JsonProperty("ViewerCount")]
 			public long ViewerCount { get; set; }
