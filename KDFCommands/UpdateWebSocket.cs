@@ -55,7 +55,7 @@ namespace KDFCommands {
 
 			running = true;
 			var thread = new Thread(() => {
-				JsonValue<Dictionary<string, Dictionary<string, string>>> listeners = null;
+				JsonValue<Dictionary<string, IList<(string, string)>>> listeners = null;
 				JsonValue<SongInfo> song = null;
 				bool frozen = false;
 				long frozenSince = -1;
@@ -128,7 +128,7 @@ namespace KDFCommands {
 			thread.Start();
 		}
 
-		private void SendListenerUpdate(JsonValue<Dictionary<string, Dictionary<string, string>>> newListeners, WebSocketConnection client = null) {
+		private void SendListenerUpdate(JsonValue<Dictionary<string, IList<(string, string)>>> newListeners, WebSocketConnection client = null) {
 			if (client != null) {
 				SendToClient(client, "listeners", JsonValue.Create(newListeners).Serialize());
 			} else {
@@ -249,23 +249,33 @@ namespace KDFCommands {
 		}
 
 		private static bool ListenersEqual(
-			JsonValue<Dictionary<string, Dictionary<string, string>>> left,
-			JsonValue<Dictionary<string, Dictionary<string, string>>> right
+			JsonValue<Dictionary<string, IList<(string, string)>>> left,
+			JsonValue<Dictionary<string, IList<(string, string)>>> right
 		) {
 			return ListenersEqualDirectional(left, right) && ListenersEqualDirectional(right, left);
 		}
 
 		private static bool ListenersEqualDirectional(
-			JsonValue<Dictionary<string, Dictionary<string, string>>> left,
-			JsonValue<Dictionary<string, Dictionary<string, string>>> right
+			JsonValue<Dictionary<string, IList<(string, string)>>> left,
+			JsonValue<Dictionary<string, IList<(string, string)>>> right
 		) {
 			foreach (var (key, value) in left.Value) {
 				if (!right.Value.ContainsKey(key)) {
 					return false;
 				}
-				
-				if (value.Any(listenerUid => !right.Value[key].ContainsKey(listenerUid.Key))) {
-					return false;
+
+				foreach (var leftData in value) {
+					var found = false;
+					
+					foreach (var rightData in right.Value[key]) {
+						if (leftData.Item1 == rightData.Item1) {
+							found = true;
+						}
+					}
+
+					if (!found) {
+						return false;
+					}
 				}
 			}
 
