@@ -1253,15 +1253,19 @@ namespace KDFCommands {
 		}
 		
 		[Command("listeners")]
-		public static JsonValue<Dictionary<string, IList<string>>> CommandListeners(Ts3Client ts3Client, TsFullClient ts3FullClient, Player player) {
+		public static JsonValue<Dictionary<string, Dictionary<string, string>>> CommandListeners(Ts3Client ts3Client, TsFullClient ts3FullClient, Player player) {
 			var channelListeners = ClientUtility.GetListeningClients(ts3Client, ts3FullClient)
-					.Where(client => !player.WebSocketPipe.Listeners.Contains(client.Uid.ToString()))
-					.Select(client => ClientUtility.GetClientNameFromUid(ts3FullClient, client.Uid))
-					.ToList();
+				.Where(client => !player.WebSocketPipe.Listeners.Contains(client.Uid.ToString()))
+				.ToDictionary(client => client.Uid.ToString(), client => ClientUtility.GetClientNameFromUid(ts3FullClient, client.Uid));
 
-			return JsonValue.Create(new Dictionary<string, IList<string>> {
-				{ "websocket", player.WebSocketPipe.Listeners },
-				{ "channel", channelListeners }	
+			var websocketListeners = player.WebSocketPipe.Listeners.ToDictionary(
+				listener => listener,
+				listener => ClientUtility.GetClientNameFromUid(ts3FullClient, Uid.To(listener))
+			);
+
+			return JsonValue.Create(new Dictionary<string, Dictionary<string, string>> {
+				{ "channel", channelListeners }	,
+				{ "websocket", websocketListeners }
 			}, data => $"Via Website: {data["websocket"]}, In Channel: {data["channel"]}");
 		}
 

@@ -55,7 +55,7 @@ namespace KDFCommands {
 
 			running = true;
 			var thread = new Thread(() => {
-				JsonValue<Dictionary<string, IList<string>>> listeners = null;
+				JsonValue<Dictionary<string, Dictionary<string, string>>> listeners = null;
 				JsonValue<SongInfo> song = null;
 				bool frozen = false;
 				long frozenSince = -1;
@@ -128,12 +128,11 @@ namespace KDFCommands {
 			thread.Start();
 		}
 
-		private void SendListenerUpdate(JsonValue<Dictionary<string, IList<string>>> newListeners, WebSocketConnection client = null) {
-			var translated = TranslateUidsToNames(newListeners);
+		private void SendListenerUpdate(JsonValue<Dictionary<string, Dictionary<string, string>>> newListeners, WebSocketConnection client = null) {
 			if (client != null) {
-				SendToClient(client, "listeners", JsonValue.Create(translated).Serialize());
+				SendToClient(client, "listeners", JsonValue.Create(newListeners).Serialize());
 			} else {
-				SendToAll("listeners", JsonValue.Create(translated).Serialize());
+				SendToAll("listeners", JsonValue.Create(newListeners).Serialize());
 			}
 		}
 		
@@ -146,18 +145,6 @@ namespace KDFCommands {
 			} else {
 				SendToAll("song", newSong.Serialize());
 			}
-		}
-
-		private Dictionary<string, IList<string>> TranslateUidsToNames(JsonValue<Dictionary<string, IList<string>>> newListeners) {
-			var translated = new Dictionary<string, IList<string>>();
-			foreach (var (key, value) in newListeners.Value) {
-				translated[key] = new List<string>();		
-				foreach (var entry in value) {
-					translated[key].Add(TryTranslateUidToName(entry));
-				}
-			}
-
-			return translated;
 		}
 
 		private string TryTranslateUidToName(string uid) {
@@ -262,22 +249,22 @@ namespace KDFCommands {
 		}
 
 		private static bool ListenersEqual(
-			JsonValue<Dictionary<string, IList<string>>> left,
-			JsonValue<Dictionary<string, IList<string>>> right
+			JsonValue<Dictionary<string, Dictionary<string, string>>> left,
+			JsonValue<Dictionary<string, Dictionary<string, string>>> right
 		) {
 			return ListenersEqualDirectional(left, right) && ListenersEqualDirectional(right, left);
 		}
 
 		private static bool ListenersEqualDirectional(
-			JsonValue<Dictionary<string, IList<string>>> left,
-			JsonValue<Dictionary<string, IList<string>>> right
+			JsonValue<Dictionary<string, Dictionary<string, string>>> left,
+			JsonValue<Dictionary<string, Dictionary<string, string>>> right
 		) {
 			foreach (var (key, value) in left.Value) {
 				if (!right.Value.ContainsKey(key)) {
 					return false;
 				}
 				
-				if (value.Any(listener => !right.Value[key].Contains(listener))) {
+				if (value.Any(listenerUid => !right.Value[key].ContainsKey(listenerUid.Key))) {
 					return false;
 				}
 			}
