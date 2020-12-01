@@ -64,7 +64,7 @@ namespace KDFCommands {
 		public JsonValue<AutofillStatus> Status(string word = "") {
 			return JsonValue.Create(new AutofillStatus {
 				Enabled = AutofillEnabled,
-				IssuerId = AutofillData?.IssuerUid.Value,
+				IssuerUid = AutofillData?.IssuerUid.Value,
 				IssuerName = AutofillData != null ? ClientUtility.GetClientNameFromUid(Ts3FullClient, AutofillData.IssuerUid) : null,
 				Word = word,
 				Playlists = AutofillData?.Playlists
@@ -329,8 +329,8 @@ namespace KDFCommands {
 		[JsonProperty("Enabled")]
 		public bool Enabled { get; set; }
 		
-		[JsonProperty("IssuerId")]
-		public string IssuerId { get; set; }
+		[JsonProperty("IssuerUid")]
+		public string IssuerUid { get; set; }
 		
 		[JsonProperty("IssuerName")]
 		public string IssuerName { get; set; }
