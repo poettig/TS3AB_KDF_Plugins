@@ -36,7 +36,7 @@ namespace KDFCommands {
 		}
 
 		private const string YOUTUBE_URL_REGEX =
-			"^(?:https?:\\/\\/)?(?:www\\.)?(?:youtube\\.com\\/watch\\?v=(.*?)(?:&.*)*|youtu\\.be\\/(.*?)\\??.*)$";
+			"^(?:https?:\\/\\/)?(?:www\\.)?(?:youtube\\.com\\/watch\\?.*?v=(.*?)(?:&.*)*|youtu\\.be\\/(.*?)\\??.*)$";
 
 		private const string TRUNCATED_MESSAGE =
 			"\nThe number of songs to add was reduced compared to your request.\n" +
