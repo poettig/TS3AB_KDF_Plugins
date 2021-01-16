@@ -1043,6 +1043,23 @@ namespace KDFCommands {
 			return $"Queued {items.Count} items from playlist {id}.";
 		}
 		
+		[Command("list item front")]
+		public static string CommandItemFront(
+			InvokerData invoker, PlaylistManager playlistManager, PlayManager playManager, 
+			string userProvidedId, string indicesString, string uid = null) {
+
+			var (plist, id) = playlistManager.GetPlaylist(userProvidedId).UnwrapThrow();
+			var indices = ParseIndicesInBounds(indicesString, 0, plist.Count - 1);
+
+			if (indices.Count != 1) {
+				throw new CommandException("Only single index is allowed for fronting.", CommandExceptionReason.CommandError);
+			}
+
+			var resource = plist[indices.First()];
+			playManager.EnqueueAsNextSong(new QueueItem(resource, new MetaData(uid != null ? Uid.To(uid) : invoker.ClientUid, id)));
+			return "Added '" + resource.ResourceTitle + "' to the front of the queue.";
+		}
+		
 		[Command("list item replaceurl")]
 		public static string ListItemReplaceUrlCommand(
 			PlaylistManager playlistManager,
