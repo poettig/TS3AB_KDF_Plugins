@@ -1312,7 +1312,7 @@ namespace KDFCommands {
 			return $"There are currently {playlistManager.Count} items"
 			       + $" across {playlistManager.GetAvailablePlaylists().Length} playlists.\n"
 			       + $" {playlistManager.UniqueCount} or"
-			       + $" {(double) playlistManager.UniqueCount / playlistManager.Count * 100:0.00} of them are unique.";
+			       + $" {(double) playlistManager.UniqueCount / playlistManager.Count * 100:0.00}% of them are unique.";
 		}
 
 		[Command("recalcgain")]
