@@ -21,6 +21,7 @@ using TS3AudioBot.Web.Api;
 using TSLib;
 using TSLib.Full;
 using TSLib.Helper;
+using TSLib.Messages;
 
 namespace KDFCommands {
 	public class KDFCommandsPlugin : IBotPlugin {
@@ -77,6 +78,7 @@ namespace KDFCommands {
 		private Description Description { get; set; }
 		internal TwitchInfoUpdater TwitchInfoUpdater { get; set; }
 		private UpdateWebSocket UpdateWebSocket { get; set; }
+		private RecalcGainInfo recalcGainInfo;
 
 		public KDFCommandsPlugin(
 			Player player,
@@ -1305,6 +1307,160 @@ namespace KDFCommands {
 			return ComposeAddMessage(playManager);
 		}
 
+		[Command("songcount")]
+		public static string CommandSongCount(PlaylistManager playlistManager) {
+			return $"There are currently {playlistManager.Count} items"
+			       + $" across {playlistManager.GetAvailablePlaylists().Length} playlists.\n"
+			       + $" {playlistManager.UniqueCount} or"
+			       + $" {(double) playlistManager.UniqueCount / playlistManager.Count * 100:0.00} of them are unique.";
+		}
+
+		[Command("recalcgain")]
+		public string CommandRecalculateGain(ResolveContext resolver, ClientCall cc) {
+			const string flagKey = "fully_analysed";
+			var postponed = new HashSet<string>();
+			var progressLock = new object();
+			int progressReset;
+		
+			// Already running.
+			if (recalcGainInfo != null) {
+				lock (progressLock) {
+					var skipped = recalcGainInfo.Progress - recalcGainInfo.Successful - recalcGainInfo.Failed;
+					return $"Gain recalculation already running, {recalcGainInfo.Progress}/{recalcGainInfo.DbSize}"
+					       + $" ({(double) recalcGainInfo.Progress / recalcGainInfo.DbSize * 100:0.00}%) done,"
+					       + $" {recalcGainInfo.Successful} successful, {recalcGainInfo.Failed} failed, {skipped} skipped.";
+				}
+			}
+
+			recalcGainInfo = new RecalcGainInfo(playlistManager.Count);
+			var thread = new Thread(() => {
+				foreach (var info in playlistManager.GetAvailablePlaylists()) {
+					var continueCurrentPlaylist = true;
+					
+					// Remember what the progress was before starting to check this playlist.
+					progressReset = recalcGainInfo.Progress;
+					
+					// Always iterate the full list from the start for each element found.
+					// This might not be efficient, but it allows for unlocking of the playlistManager between analyses.
+					while (continueCurrentPlaylist) {
+						// Lock the playlist during iteration so that the index of the modified entry cannot change.
+						playlistManager.ModifyPlaylist(info.Id, editor => {
+							// Get playlist.
+							var playlistOption = playlistManager.GetPlaylist(info.Id);
+							
+							if (!playlistOption.Ok) {
+								Log.Error($"Failed to fetch playlist {info.Id}.");
+								continueCurrentPlaylist = false;
+								return;
+							}
+							
+							// Find candidate that is not fully analyzed yet.
+							AudioResource candidate = null;
+							var candidateIndex = 0;
+							var candidateIdentifier = "";
+							var (currentPlaylist, _) = playlistOption.Value;
+							
+							// The lock is necessary for a consistent progress report if someone asks.
+							lock (progressLock) {
+								// Reset progress to what it was when we began checking this playlist.
+								recalcGainInfo.Progress = progressReset;
+								
+								// Search next candidate.
+								for (var i = 0; i < currentPlaylist.Count; i++) {
+									recalcGainInfo.Progress++;
+									var currentResource = currentPlaylist[i];
+									var identifier = $"{info.Id}:{i}:{currentResource.UniqueId}";
+
+									if (postponed.Contains(identifier)) {
+										continue;
+									}
+
+									if (
+										currentResource.AdditionalData == null
+										|| currentResource.Gain == null
+										|| !currentResource.AdditionalData.ContainsKey(flagKey)
+										|| currentResource.AdditionalData[flagKey] != "true"
+									) {
+										candidate = currentResource.DeepCopy();
+										candidateIdentifier = identifier;
+										candidateIndex = i;
+										break;
+									}
+								}
+							}
+
+							// No candidate found, go to next playlist.
+							if (candidate == null) {
+								continueCurrentPlaylist = false;
+								return;
+							}
+		
+							// Add additional data if it does not exist yet.
+							if (candidate.AdditionalData == null) {
+								candidate = candidate.WithNewAdditionalData();
+							}
+		
+							// Resolve the resource to an analyzable URL.
+							var playResourceOption = resolver.Load(candidate);
+							if (!playResourceOption.Ok) {
+								Log.Error($"Problem resolving '{candidateIdentifier}': {playResourceOption.Error}");
+		
+								// Mark as postponed so that the loop does not hang forever on a broken playlist entry.
+								postponed.Add(candidateIdentifier);
+								recalcGainInfo.Failed++;
+								return;
+							}
+		
+							// Analyse the resource fully.
+							var gain = player.FfmpegProducer.VolumeDetect(
+								playResourceOption.Value.PlayUri,
+								new CancellationToken(), 
+								true
+							);
+							candidate = candidate.WithGain(gain);
+							candidate.AdditionalData[flagKey] = "true";
+							
+							if (!playlistManager.TryGetUniqueResourceInfo(candidate, out var resourceInfo)) {
+								Log.Error($"Failed replacing '{candidateIdentifier}': Could not find unique resource.");
+								recalcGainInfo.Failed++;
+								return;
+							}
+							
+							// Replace the old entry with the new one.
+							// Do that for all occurences of this audio resource across all playlists.
+							var result = playlistManager.ChangeItemAtDeep(info.Id, candidateIndex, candidate);
+							if (!result.Ok) {
+								Log.Error($"Failed replacing '{candidateIdentifier}': {result.Error}");
+								recalcGainInfo.Failed++;
+								return;
+							}
+							
+							Log.Info(
+								$"Finished full analysis of '{candidateIdentifier}': " +
+						        $"{gain} dB gain, replaced in " +
+								$"{string.Join(", ", resourceInfo.ContainingLists.Select(kv => '\'' + kv.Key + '\''))}."
+							);
+							recalcGainInfo.Successful++;
+						});
+					}
+				}
+
+				var analyzed = recalcGainInfo.Successful + recalcGainInfo.Failed;
+				var skipped = recalcGainInfo.Progress - analyzed;
+				var msg = $"Recalculation of gain values done, {analyzed}/{recalcGainInfo.DbSize}"
+				          + $" analysed ({(double) analyzed / recalcGainInfo.DbSize * 100:0.00}%),"
+				          + $" {recalcGainInfo.Successful} successful, {recalcGainInfo.Failed} failed, {skipped} skipped.";
+				Log.Info(msg);
+				ClientUtility.SendMessage(ts3Client, cc, msg);
+				recalcGainInfo = null;
+			}) {
+				IsBackground = true
+			};
+			thread.Start();
+
+			return $"Started gain recalculation for {recalcGainInfo.DbSize} elements.";
+		}
+			
 		public class TwitchInfo {
 			[JsonProperty("ViewerCount")]
 			public long ViewerCount { get; set; }
@@ -1332,6 +1488,17 @@ namespace KDFCommands {
 			
 			[JsonProperty("IssuerName")]
 			public string IssuerName { get; set; }
+		}
+
+		private class RecalcGainInfo {
+			public int DbSize { get; set; }
+			public int Progress { get; set; }
+			public int Successful { get; set; }
+			public int Failed { get; set; }
+
+			public RecalcGainInfo(int dbSize) {
+				DbSize = dbSize;
+			} 
 		}
 	}
 }
