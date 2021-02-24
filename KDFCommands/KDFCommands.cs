@@ -1387,11 +1387,12 @@ namespace KDFCommands {
 						var resource = playlistOption.Value.list[resIdx];
 						var identifier = $"{playlistOption.Value.id}:{resIdx}:{resource.UniqueId}";
 
+						recalcGainInfo.Progress++;
+						
 						if (!isGainRecalculationCandidate(resource, flagKey)) {
 							continue;
 						}
 
-						recalcGainInfo.Progress++;
 						var newResource = resource.DeepCopy();
 
 						// Add additional data if it does not exist yet.
