@@ -1338,7 +1338,7 @@ namespace KDFCommands {
 				var etaString = "N/A";
 				try {
 					var eta = TimeSpan.FromMinutes((recalcGainInfo.ToProcessEstimate - analyzed) / ppm);
-					etaString = $"{eta.Days}d, {eta.Hours:00}h {eta.Minutes:00}m {eta.Seconds:00}";
+					etaString = $"{eta.Days}d, {eta.Hours:00}h {eta.Minutes:00}m {eta.Seconds:00}s";
 				} catch (OverflowException) {
 					// Its fine, we have a default string for that.
 				}
