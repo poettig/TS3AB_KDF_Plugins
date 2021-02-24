@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Linq;
 using System.Net.Http;
 using System.Text;
@@ -8,6 +9,7 @@ using System.Threading;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
+using NLog.Fluent;
 using TS3AudioBot;
 using TS3AudioBot.Audio;
 using TS3AudioBot.CommandSystem;
@@ -1315,141 +1317,170 @@ namespace KDFCommands {
 			       + $" {(double) playlistManager.UniqueCount / playlistManager.Count * 100:0.00}% of them are unique.";
 		}
 
+		private bool isGainRecalculationCandidate(AudioResource resource, string flagKey) {
+			return (
+				resource.AdditionalData == null
+				|| resource.Gain == null
+				|| !resource.AdditionalData.ContainsKey(flagKey)
+				|| resource.AdditionalData[flagKey] != "true"
+			);
+		}
+
 		[Command("recalcgain")]
 		public string CommandRecalculateGain(ResolveContext resolver, ClientCall cc) {
 			const string flagKey = "fully_analysed";
-			var postponed = new HashSet<string>();
-			var progressLock = new object();
-			int progressReset;
-		
+
 			// Already running.
 			if (recalcGainInfo != null) {
-				lock (progressLock) {
-					var skipped = recalcGainInfo.Progress - recalcGainInfo.Successful - recalcGainInfo.Failed;
-					return $"Gain recalculation already running, {recalcGainInfo.Progress}/{recalcGainInfo.DbSize}"
-					       + $" ({(double) recalcGainInfo.Progress / recalcGainInfo.DbSize * 100:0.00}%) done,"
-					       + $" {recalcGainInfo.Successful} successful, {recalcGainInfo.Failed} failed, {skipped} skipped.";
+				var analyzed = recalcGainInfo.Successful + recalcGainInfo.Failed;
+				var elapsed = recalcGainInfo.Watch.Elapsed;
+				var ppm = elapsed.TotalMinutes < 1 ? analyzed : analyzed / elapsed.TotalMinutes;
+				var etaString = "N/A";
+				try {
+					var eta = TimeSpan.FromMinutes((recalcGainInfo.ToProcessEstimate - analyzed) / ppm);
+					etaString = $"{eta.Days}d, {eta.Hours:00}h {eta.Minutes:00}m {eta.Seconds:00}";
+				} catch (OverflowException) {
+					// Its fine, we have a default string for that.
+				}
+
+				return "Gain recalculation already running.\n"
+				       + $"{recalcGainInfo.Progress}/{recalcGainInfo.DbSize}"
+				       + $" ({(double) recalcGainInfo.Progress / recalcGainInfo.DbSize * 100:0.00}%) scanned,"
+				       + $" {analyzed} analysed: {recalcGainInfo.Successful} successful, {recalcGainInfo.Failed} failed.\n"
+				       + $" Running since {elapsed.Days}d, {elapsed.Hours:00}h {elapsed.Minutes:00}m {elapsed.Seconds:00}s,"
+				       + $" {ppm:0.0} items/m,"
+				       + $" ETA {etaString}.";
+			}
+
+			// Estimate how many items there are to process (estimation because that can change if an item in a playlist
+			// is removed or added).
+			var toProcess = 0;
+			foreach (var info in playlistManager.GetAvailablePlaylists()) {
+				foreach (var entry in playlistManager.GetPlaylist(info.Id).UnwrapThrow().list) {
+					if (isGainRecalculationCandidate(entry, flagKey)) {
+						toProcess++;
+					}
 				}
 			}
 
-			recalcGainInfo = new RecalcGainInfo(playlistManager.Count);
+			recalcGainInfo = new RecalcGainInfo(playlistManager.Count, toProcess);
 			var thread = new Thread(() => {
-				foreach (var info in playlistManager.GetAvailablePlaylists()) {
-					var continueCurrentPlaylist = true;
+				var playlists = playlistManager.GetAvailablePlaylists();
+				for (var plIdx = 0; plIdx < playlists.Length; plIdx++) {
+					// Get playlist.
+					var playlistOption = playlistManager.GetPlaylist(playlists[plIdx].Id);
+
+					if (!playlistOption.Ok) {
+						Log.Error($"Failed to fetch playlist {playlists[plIdx].Id}.");
+						return;
+					}
+
+					// Remember analyze stats from before starting the playlist in order to remove results
+					// in case the playlist disappears.
+					var toProcessEstimate = playlistOption.Value.list.Count(r => isGainRecalculationCandidate(r, flagKey));
+					var previousSuccessfuls = recalcGainInfo.Successful;
+					var previousFails = recalcGainInfo.Failed;
+					var previousProgress = recalcGainInfo.Progress;
 					
-					// Remember what the progress was before starting to check this playlist.
-					progressReset = recalcGainInfo.Progress;
-					
-					// Always iterate the full list from the start for each element found.
-					// This might not be efficient, but it allows for unlocking of the playlistManager between analyses.
-					while (continueCurrentPlaylist) {
-						// Lock the playlist during iteration so that the index of the modified entry cannot change.
-						playlistManager.ModifyPlaylist(info.Id, editor => {
-							// Get playlist.
-							var playlistOption = playlistManager.GetPlaylist(info.Id);
-							
-							if (!playlistOption.Ok) {
-								Log.Error($"Failed to fetch playlist {info.Id}.");
-								continueCurrentPlaylist = false;
-								return;
-							}
-							
-							// Find candidate that is not fully analyzed yet.
-							AudioResource candidate = null;
-							var candidateIndex = 0;
-							var candidateIdentifier = "";
-							var (currentPlaylist, _) = playlistOption.Value;
-							
-							// The lock is necessary for a consistent progress report if someone asks.
-							lock (progressLock) {
-								// Reset progress to what it was when we began checking this playlist.
-								recalcGainInfo.Progress = progressReset;
+					// Find candidate that is not fully analyzed yet.
+					for (var resIdx = 0; resIdx < playlistOption.Value.list.Count; resIdx++) {
+						var resource = playlistOption.Value.list[resIdx];
+						var identifier = $"{playlistOption.Value.id}:{resIdx}:{resource.UniqueId}";
+
+						if (!isGainRecalculationCandidate(resource, flagKey)) {
+							continue;
+						}
+
+						recalcGainInfo.Progress++;
+						var newResource = resource.DeepCopy();
+
+						// Add additional data if it does not exist yet.
+						if (newResource.AdditionalData == null) {
+							newResource = newResource.WithNewAdditionalData();
+						}
+
+						// Resolve the resource to an analyzable URL.
+						var playResourceOption = resolver.Load(newResource);
+						if (!playResourceOption.Ok) {
+							Log.Error($"Problem resolving '{identifier}': {playResourceOption.Error}");
+							recalcGainInfo.Failed++;
+							continue;
+						}
+
+						// Analyse the resource fully.
+						var gain = player.FfmpegProducer.VolumeDetect(
+							playResourceOption.Value.PlayUri,
+							new CancellationToken(),
+							true
+						);
+						newResource = newResource.WithGain(gain);
+						newResource.AdditionalData[flagKey] = "true";
+
+						// Lock the playlistManager
+						lock (playlistManager.Lock) {
+							// Re-fetch the playlist in order to check if it still exists.
+							var plOpt = playlistManager.GetPlaylist(playlists[plIdx].Id);
+							if (!plOpt.Ok) {
+								Log.Error($"Playlist {playlists[plIdx].Id} disappeared during analysis. Skipping playlist.");
 								
-								// Search next candidate.
-								for (var i = 0; i < currentPlaylist.Count; i++) {
-									recalcGainInfo.Progress++;
-									var currentResource = currentPlaylist[i];
-									var identifier = $"{info.Id}:{i}:{currentResource.UniqueId}";
-
-									if (postponed.Contains(identifier)) {
-										continue;
-									}
-
-									if (
-										currentResource.AdditionalData == null
-										|| currentResource.Gain == null
-										|| !currentResource.AdditionalData.ContainsKey(flagKey)
-										|| currentResource.AdditionalData[flagKey] != "true"
-									) {
-										candidate = currentResource.DeepCopy();
-										candidateIdentifier = identifier;
-										candidateIndex = i;
-										break;
-									}
-								}
+								// Update the DbSize to ignore the disappeared playlist for stats.
+								recalcGainInfo.DbSize -= playlists[plIdx].SongCount;
+								
+								// Update process estimate to ignore the disappeared playlist for stats.
+								// Only subtract as many items as there where candidates in the playlist.
+								recalcGainInfo.ToProcessEstimate -= toProcessEstimate;
+								
+								// Update stats by resetting them to the value bofore starting to scan the disappeared playlist.
+								recalcGainInfo.Successful = previousSuccessfuls;
+								recalcGainInfo.Failed = previousFails;
+								recalcGainInfo.Progress = previousProgress;
+								
+								break;
 							}
-
-							// No candidate found, go to next playlist.
-							if (candidate == null) {
-								continueCurrentPlaylist = false;
-								return;
-							}
-		
-							// Add additional data if it does not exist yet.
-							if (candidate.AdditionalData == null) {
-								candidate = candidate.WithNewAdditionalData();
-							}
-		
-							// Resolve the resource to an analyzable URL.
-							var playResourceOption = resolver.Load(candidate);
-							if (!playResourceOption.Ok) {
-								Log.Error($"Problem resolving '{candidateIdentifier}': {playResourceOption.Error}");
-		
-								// Mark as postponed so that the loop does not hang forever on a broken playlist entry.
-								postponed.Add(candidateIdentifier);
-								recalcGainInfo.Failed++;
-								return;
-							}
-		
-							// Analyse the resource fully.
-							var gain = player.FfmpegProducer.VolumeDetect(
-								playResourceOption.Value.PlayUri,
-								new CancellationToken(), 
-								true
-							);
-							candidate = candidate.WithGain(gain);
-							candidate.AdditionalData[flagKey] = "true";
 							
-							if (!playlistManager.TryGetUniqueResourceInfo(candidate, out var resourceInfo)) {
-								Log.Error($"Failed replacing '{candidateIdentifier}': Could not find unique resource.");
+							// Check if there is still the same resource at this index in the playlist.
+							if (!plOpt.Value.list[resIdx].Equals(newResource)) {
+								Log.Error($"Failed replacing '{identifier}': Resource at index {resIdx} changed during analysis.");
+								
+								// Trigger that playlist is completely scanned again.
+								plIdx--;
+								break;
+							}
+							
+							if (!playlistManager.TryGetUniqueResourceInfo(newResource, out var resourceInfo)) {
+								Log.Error($"Failed replacing '{identifier}': Could not find unique resource info.");
 								recalcGainInfo.Failed++;
-								return;
+								continue;
 							}
 							
 							// Replace the old entry with the new one.
 							// Do that for all occurences of this audio resource across all playlists.
-							var result = playlistManager.ChangeItemAtDeep(info.Id, candidateIndex, candidate);
+							var result = playlistManager.ChangeItemAtDeep(playlists[plIdx].Id, resIdx, newResource);
 							if (!result.Ok) {
-								Log.Error($"Failed replacing '{candidateIdentifier}': {result.Error}");
+								Log.Error($"Failed replacing '{identifier}': {result.Error}");
 								recalcGainInfo.Failed++;
 								return;
 							}
-							
+
 							Log.Info(
-								$"Finished full analysis of '{candidateIdentifier}': " +
-						        $"{gain} dB gain, replaced in " +
-								$"{string.Join(", ", resourceInfo.ContainingLists.Select(kv => '\'' + kv.Key + '\''))}."
+								$"Finished full analysis of '{identifier}': " +
+								$"Changed gain from {resource.Gain ?? 0} dB to {gain} dB, affected the playlists" +
+								$" {string.Join(", ", resourceInfo.ContainingLists.Select(kv => '\'' + kv.Key + '\''))}."
 							);
-							recalcGainInfo.Successful++;
-						});
+							recalcGainInfo.Successful += resourceInfo.ContainingLists.Count();
+						}
 					}
 				}
 
+				recalcGainInfo.Watch.Stop();
 				var analyzed = recalcGainInfo.Successful + recalcGainInfo.Failed;
-				var skipped = recalcGainInfo.Progress - analyzed;
-				var msg = $"Recalculation of gain values done, {analyzed}/{recalcGainInfo.DbSize}"
-				          + $" analysed ({(double) analyzed / recalcGainInfo.DbSize * 100:0.00}%),"
-				          + $" {recalcGainInfo.Successful} successful, {recalcGainInfo.Failed} failed, {skipped} skipped.";
+				var elapsed = recalcGainInfo.Watch.Elapsed;
+				var msg = "Recalculation of gain values done.\n"
+				          + $"{analyzed}/{recalcGainInfo.DbSize}"
+				          + $" ({(double) analyzed / recalcGainInfo.DbSize * 100:0.00}%) analysed"
+				          + $" (estimation was {recalcGainInfo.ToProcessEstimate}/{recalcGainInfo.DbSize}):"
+				          + $" {recalcGainInfo.Successful} successful, {recalcGainInfo.Failed} failed."
+				          + $" Recalucation took {elapsed.Days}d, {elapsed.Hours:00}h {elapsed.Minutes:00}m {elapsed.Seconds:00}s.";
 				Log.Info(msg);
 				ClientUtility.SendMessage(ts3Client, cc, msg);
 				recalcGainInfo = null;
@@ -1458,9 +1489,9 @@ namespace KDFCommands {
 			};
 			thread.Start();
 
-			return $"Started gain recalculation for {recalcGainInfo.DbSize} elements.";
+			return $"Started gain recalculation for {recalcGainInfo.ToProcessEstimate}/{recalcGainInfo.DbSize} elements.";
 		}
-			
+
 		public class TwitchInfo {
 			[JsonProperty("ViewerCount")]
 			public long ViewerCount { get; set; }
@@ -1492,12 +1523,16 @@ namespace KDFCommands {
 
 		private class RecalcGainInfo {
 			public int DbSize { get; set; }
+			public int ToProcessEstimate { get; set; }
 			public int Progress { get; set; }
 			public int Successful { get; set; }
 			public int Failed { get; set; }
+			public Stopwatch Watch { get; }
 
-			public RecalcGainInfo(int dbSize) {
+			public RecalcGainInfo(int dbSize, int toProcessEstimate) {
 				DbSize = dbSize;
+				ToProcessEstimate = toProcessEstimate;
+				Watch = Stopwatch.StartNew();
 			} 
 		}
 	}
