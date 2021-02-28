@@ -9,7 +9,6 @@ using System.Threading;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
-using NLog.Fluent;
 using TS3AudioBot;
 using TS3AudioBot.Audio;
 using TS3AudioBot.CommandSystem;
@@ -23,7 +22,6 @@ using TS3AudioBot.Web.Api;
 using TSLib;
 using TSLib.Full;
 using TSLib.Helper;
-using TSLib.Messages;
 
 namespace KDFCommands {
 	public class KDFCommandsPlugin : IBotPlugin {
@@ -40,7 +38,7 @@ namespace KDFCommands {
 
 		private const string YOUTUBE_URL_REGEX =
 			"^(?:https?:\\/\\/)?(?:www\\.)?(?:youtube\\.com\\/watch\\?.*?v=(.*?)(?:&.*)*|youtu\\.be\\/(.*?)\\??.*)$";
-
+		private const string SPOTIFY_TRACK_URI_REGEX = "^spotify:track:.*$";
 		private const string TRUNCATED_MESSAGE =
 			"\nThe number of songs to add was reduced compared to your request.\n" +
 			"This can happen because the requested number of songs was not evenly divisible by the number of playlists " +
@@ -412,9 +410,14 @@ namespace KDFCommands {
 
 				// Check if URL
 				string query = part.Replace("[URL]", "").Replace("[/URL]", "").Trim(' ');
-				if (Regex.Match(query, YOUTUBE_URL_REGEX).Success) {
-					ifUrl(playlistManager, playManager, execInfo, invoker.ClientUid, resolver, cc, ts3Client, ts3FullClient,
-						query, target);
+				if (
+					Regex.Match(query, YOUTUBE_URL_REGEX).Success
+					|| Regex.Match(query, SPOTIFY_TRACK_URI_REGEX).Success
+				) {
+					ifUrl(
+						playlistManager, playManager, execInfo, invoker.ClientUid,
+						resolver, cc, ts3Client, ts3FullClient, query, target
+					);
 				} else {
 					ifQuery(playlistManager, playManager, execInfo, invoker.ClientUid, resolver, cc, ts3Client, ts3FullClient,
 						query, target);
