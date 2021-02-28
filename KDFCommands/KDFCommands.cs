@@ -1318,7 +1318,8 @@ namespace KDFCommands {
 		}
 
 		private bool isGainRecalculationCandidate(AudioResource resource, string flagKey) {
-			return (
+			// Gain calculation only for "youtube" tracks
+			return resource.AudioType == "youtube" && (
 				resource.AdditionalData == null
 				|| resource.Gain == null
 				|| !resource.AdditionalData.ContainsKey(flagKey)
