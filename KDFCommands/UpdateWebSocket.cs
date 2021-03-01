@@ -1,13 +1,12 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Net;
 using System.Threading;
 using TS3AudioBot;
 using TS3AudioBot.Audio;
 using TS3AudioBot.CommandSystem;
 using TS3AudioBot.Config;
-using TS3AudioBot.Playlists;
+using TS3AudioBot.ResourceFactories;
 using TS3AudioBot.Web.Api;
 using TS3AudioBot.Web.Model;
 using TS3AudioBot.Web.WebSocket;
@@ -23,7 +22,7 @@ namespace KDFCommands {
 		private readonly KDFCommandsPlugin kdf;
 		private readonly Player player;
 		private readonly PlayManager playManager;
-		private readonly PlaylistManager playlistManager;
+		private readonly ResolveContext resolver;
 		private readonly Ts3Client ts3Client;
 		private readonly TsFullClient ts3FullClient;
 
@@ -33,7 +32,7 @@ namespace KDFCommands {
 			KDFCommandsPlugin kdf,
 			Player player,
 			PlayManager playManager,
-			PlaylistManager playlistManager,
+			ResolveContext resolver,
 			Ts3Client ts3Client,
 			TsFullClient ts3FullClient,
 			ConfWebSocket confWebSocket
@@ -41,7 +40,7 @@ namespace KDFCommands {
 			this.kdf = kdf;
 			this.player = player;
 			this.playManager = playManager;
-			this.playlistManager = playlistManager;
+			this.resolver = resolver;
 			this.ts3Client = ts3Client;
 			this.ts3FullClient = ts3FullClient;
 
@@ -71,7 +70,7 @@ namespace KDFCommands {
 					// Check if song should be updated
 					JsonValue<SongInfo> newSong = null;
 					try {
-						newSong = MainCommands.CommandSong(playManager, player, ts3FullClient);
+						newSong = MainCommands.CommandSong(playManager, player, resolver);
 					} catch (CommandException) {
 						// Don't crash just because nothing is playing
 					}
@@ -168,7 +167,7 @@ namespace KDFCommands {
 		private void ClientConnected(object sender, ClientConnectedEventArgs e) {
 			// Send all initial info necessary
 			try {
-				SendSongUpdate(MainCommands.CommandSong(playManager, player, ts3FullClient), e.Client);
+				SendSongUpdate(MainCommands.CommandSong(playManager, player, resolver), e.Client);
 			} catch (CommandException) {
 				// Nothing playing
 				SendToClient(e.Client, "song", null);

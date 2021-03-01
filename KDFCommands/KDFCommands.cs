@@ -39,6 +39,7 @@ namespace KDFCommands {
 		private const string YOUTUBE_URL_REGEX =
 			"^(?:https?:\\/\\/)?(?:www\\.)?(?:youtube\\.com\\/watch\\?.*?v=(.*?)(?:&.*)*|youtu\\.be\\/(.*?)\\??.*)$";
 		private const string SPOTIFY_TRACK_URI_REGEX = "^spotify:track:.*$";
+		private const string SPOTIFY_TRACK_URL_REGEX = "https://open.spotify.com/track/(.*)?\\?.*$";
 		private const string TRUNCATED_MESSAGE =
 			"\nThe number of songs to add was reduced compared to your request.\n" +
 			"This can happen because the requested number of songs was not evenly divisible by the number of playlists " +
@@ -66,6 +67,8 @@ namespace KDFCommands {
 		private readonly Player player;
 		private readonly PlayManager playManager;
 		private readonly PlaylistManager playlistManager;
+		
+		private readonly ResolveContext resolver;
 
 		private readonly TsFullClient ts3FullClient;
 		private readonly Ts3Client ts3Client;
@@ -83,7 +86,7 @@ namespace KDFCommands {
 		public KDFCommandsPlugin(
 			Player player,
 			PlayManager playManager,
-			PlaylistManager playlistManager,
+			ResolveContext resolver,
 			Ts3Client ts3Client,
 			TsFullClient ts3FullClient,
 			CommandManager commandManager,
@@ -93,7 +96,8 @@ namespace KDFCommands {
 			
 			this.player = player;
 			this.playManager = playManager;
-			this.playlistManager = playlistManager;
+
+			this.resolver = resolver;
 
 			this.ts3FullClient = ts3FullClient;
 			bot.RegenerateStatusImage();
@@ -112,7 +116,7 @@ namespace KDFCommands {
 			Voting = new Voting(player, ts3Client, ts3FullClient, confBot);
 			Autofill = new Autofill(ts3Client, player, playManager, playlistManager, ts3FullClient);
 			Description = new Description(player, ts3Client, playManager);
-			UpdateWebSocket = new UpdateWebSocket(this, player, playManager, playlistManager, ts3Client, ts3FullClient, confBot.WebSocket);
+			UpdateWebSocket = new UpdateWebSocket(this, player, playManager, resolver, ts3Client, ts3FullClient, confBot.WebSocket);
 		}
 
 		public void Dispose() {
@@ -380,7 +384,16 @@ namespace KDFCommands {
 			Uid uid = Uid.To(uidStr);
 			
 			string query = message.Replace("[URL]", "").Replace("[/URL]", "").Trim(' ');
-			if (Regex.Match(query, YOUTUBE_URL_REGEX).Success) {
+
+			var match = Regex.Match(query, SPOTIFY_TRACK_URL_REGEX);
+			if (match.Success) {
+				query = "spotify:track:" + match.Groups[1];
+			}
+			
+			if (
+				Regex.Match(query, YOUTUBE_URL_REGEX).Success
+				|| Regex.Match(query, SPOTIFY_TRACK_URI_REGEX).Success
+			) {
 				return AddUrl(playlistManager, playManager, execInfo, uid, resolver, null, ts3Client, ts3FullClient,
 					query, silent: true);
 			} else {
@@ -407,9 +420,15 @@ namespace KDFCommands {
 				if (part == "") {
 					return;
 				}
-
+				
 				// Check if URL
 				string query = part.Replace("[URL]", "").Replace("[/URL]", "").Trim(' ');
+				
+				var match = Regex.Match(query, SPOTIFY_TRACK_URL_REGEX);
+				if (match.Success) {
+					query = "spotify:track:" + match.Groups[1];
+				}
+
 				if (
 					Regex.Match(query, YOUTUBE_URL_REGEX).Success
 					|| Regex.Match(query, SPOTIFY_TRACK_URI_REGEX).Success
