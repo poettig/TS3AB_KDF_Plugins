@@ -86,6 +86,7 @@ namespace KDFCommands {
 		public KDFCommandsPlugin(
 			Player player,
 			PlayManager playManager,
+			PlaylistManager playlistManager,
 			ResolveContext resolver,
 			Ts3Client ts3Client,
 			TsFullClient ts3FullClient,
@@ -96,6 +97,7 @@ namespace KDFCommands {
 			
 			this.player = player;
 			this.playManager = playManager;
+			this.playlistManager = playlistManager;
 
 			this.resolver = resolver;
 
