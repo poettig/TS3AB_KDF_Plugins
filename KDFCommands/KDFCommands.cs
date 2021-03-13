@@ -875,6 +875,9 @@ namespace KDFCommands {
 			
 			[JsonProperty(PropertyName = "ResourceId")]
 			public string ResourceId { get; set; }
+			
+			[JsonProperty(PropertyName = "ResourceType")]
+			public string ResourceType { get; set; }
 		}
 
 		public class CurrentQueueInfo {
@@ -919,7 +922,8 @@ namespace KDFCommands {
 				Title = restrict ? null : qi.AudioResource.ResourceTitle,
 				UserId = qi.MetaData.ResourceOwnerUid.GetValueOrDefault(Uid.Null).Value,
 				UserName = ClientUtility.GetClientNameFromUid(ts3FullClient, qi.MetaData.ResourceOwnerUid.GetValueOrDefault(Uid.Null)),
-				ResourceId = qi.AudioResource.ResourceId
+				ResourceId = qi.AudioResource.ResourceId,
+				ResourceType = qi.AudioResource.AudioType
 			};
 		}
 
