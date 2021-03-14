@@ -157,7 +157,7 @@ namespace KDFCommands {
 		}
 
 		private void UpdateRecentlyPlayed(object sender, EventArgs _) {
-			SendToAll( "recentlyplayed", kdf.CommandRecentlyPlayed(playManager, 50).Serialize());
+			SendToAll( "recentlyplayed", kdf.CommandRecentlyPlayed(50).Serialize());
 		}
 
 		private void SkipVoteChanged(object sender, Voting.SkipVoteEventArgs data) {
@@ -174,7 +174,7 @@ namespace KDFCommands {
 			}
 			SendListenerUpdate(KDFCommandsPlugin.CommandListeners(ts3Client, ts3FullClient, player), e.Client);
 			SendToClient(e.Client, "queue", kdf.CommandQueueInternal(Uid.To(e.Client.Uid)).Serialize());
-			SendToClient(e.Client, "recentlyplayed", kdf.CommandRecentlyPlayed(playManager, 50).Serialize());
+			SendToClient(e.Client, "recentlyplayed", kdf.CommandRecentlyPlayed(50).Serialize());
 			SendToClient(e.Client, "autofill", kdf.Autofill.Status().Serialize());
 
 			foreach (var (key, value) in kdf.Voting.CurrentVotes) {

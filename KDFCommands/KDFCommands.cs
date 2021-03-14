@@ -36,11 +36,11 @@ namespace KDFCommands {
 				{RightOverrideQueueCommandCheck, RightDeleteOther, RightSkipOther};
 		}
 
-		private const string YOUTUBE_URL_REGEX =
+		private const string YoutubeUrlRegex =
 			"^(?:https?:\\/\\/)?(?:www\\.)?(?:youtube\\.com\\/watch\\?.*?v=(.*?)(?:&.*)*|youtu\\.be\\/(.*?)\\??.*)$";
-		private const string SPOTIFY_TRACK_URI_REGEX = "^spotify:track:.*$";
-		private const string SPOTIFY_TRACK_URL_REGEX = "https://open.spotify.com/track/(.*)?\\?.*$";
-		private const string TRUNCATED_MESSAGE =
+		private const string SpotifyTrackUriRegex = "^spotify:track:.*$";
+		private const string SpotifyTrackUrlRegex = "https:\\/\\/open\\.spotify\\.com\\/track\\/([A-Za-z0-9]+)\\??.*$";
+		private const string TruncatedMessage =
 			"\nThe number of songs to add was reduced compared to your request.\n" +
 			"This can happen because the requested number of songs was not evenly divisible by the number of playlists " +
 			"or at least one playlist had not enough songs (or both).";
@@ -48,21 +48,6 @@ namespace KDFCommands {
 		public const string RightDeleteOther = "del.other";
 		public const string RightSkipOther = "skip.other";
 		public const string RightOverrideQueueCommandCheck = "queue.view.full";
-
-		private delegate string PartHandler(
-			PlaylistManager playlistManager,
-			PlayManager playManager,
-			ExecutionInformation info,
-			Uid uid,
-			ResolveContext resolver,
-			ClientCall cc,
-			Ts3Client ts3Client,
-			TsFullClient tsFullClient,
-			string query,
-			string target = null,
-			bool silent = false,
-			Dictionary<string, string> additionalData = null
-		);
 
 		private readonly Player player;
 		private readonly PlayManager playManager;
@@ -348,221 +333,276 @@ namespace KDFCommands {
 				" songs across " + numPlaylists +
 				" playlists to the queue at positions " + startPos +
 				"-" + (startPos + numSongsAdded) +
-				"." + (truncated ? TRUNCATED_MESSAGE : "");
+				"." + (truncated ? TruncatedMessage : "");
 		}
-
-		[Command("youtube")]
-		public static void CommandYoutube(
-			PlayManager playManager,
-			PlaylistManager playlistManager,
+		
+		[Command("list add")]
+		public JsonArray<QueryResult> CommandListAdd(
 			ExecutionInformation execInfo,
-			ResolveContext resolver,
 			InvokerData invoker,
-			ClientCall cc,
-			Ts3Client ts3Client,
-			TsFullClient ts3FullClient,
-			string message) {
-			string[] parts = Regex.Split(message, ";+");
-
-			ClientUtility.SendMessage(ts3Client, cc,
-				"Received your request to add " + parts.Length + " songs, processing...");
-
-			PartHandler urlHandler = AddUrl;
-			PartHandler queryHandler = AddQuery;
-			ParseMulti(urlHandler, queryHandler, playManager, playlistManager, execInfo, resolver, invoker, cc,
-				ts3Client, ts3FullClient, parts, "");
+			string listId,
+			string message,
+			ClientCall cc = null
+		) {
+			return ProcessQueries(execInfo, GetValidUid(invoker, null), message, cc, listId);
 		}
-
-		[Command("youtubewithuid")]
-		public static string CommandYoutubeWithUid(
-			PlayManager playManager,
-			PlaylistManager playlistManager,
+		
+		[Command("list addwithuid")]
+		public JsonArray<QueryResult> CommandListAdd(
 			ExecutionInformation execInfo,
-			ResolveContext resolver,
-			Ts3Client ts3Client,
-			TsFullClient ts3FullClient,
+			InvokerData invoker,
 			string uidStr,
-			string message) {
-			Uid uid = Uid.To(uidStr);
-			
-			string query = message.Replace("[URL]", "").Replace("[/URL]", "").Trim(' ');
-
-			var match = Regex.Match(query, SPOTIFY_TRACK_URL_REGEX);
-			if (match.Success) {
-				query = "spotify:track:" + match.Groups[1];
-			}
-			
-			if (
-				Regex.Match(query, YOUTUBE_URL_REGEX).Success
-				|| Regex.Match(query, SPOTIFY_TRACK_URI_REGEX).Success
-			) {
-				return AddUrl(playlistManager, playManager, execInfo, uid, resolver, null, ts3Client, ts3FullClient,
-					query, silent: true);
-			} else {
-				return AddQuery(playlistManager, playManager, execInfo, uid, resolver, null, ts3Client,
-					ts3FullClient, query, silent: true);
-			}
+			string listId,
+			string message,
+			ClientCall cc = null
+		) {
+			return ProcessQueries(execInfo, GetValidUid(invoker, uidStr), message, cc, listId);
+		}
+		
+		[Command("queuesongs")]
+		public JsonArray<QueryResult> CommandQueueSong(
+			ExecutionInformation execInfo,
+			InvokerData invoker,
+			string message,
+			ClientCall cc = null
+		) {
+			return ProcessQueries(execInfo, GetValidUid(invoker, null), message, cc);
+		}
+		
+		[Command("queuesongswithuid")]
+		public JsonArray<QueryResult> CommandQueueSong(
+			ExecutionInformation execInfo,
+			InvokerData invoker,
+			string uidStr,
+			string message,
+			ClientCall cc = null
+		) {
+			return ProcessQueries(execInfo, GetValidUid(invoker, uidStr), message, cc);
 		}
 
-		private static void ParseMulti(
-			PartHandler ifUrl,
-			PartHandler ifQuery,
-			PlayManager playManager,
-			PlaylistManager playlistManager,
+		private JsonArray<QueryResult> ProcessQueries(
 			ExecutionInformation execInfo,
-			ResolveContext resolver,
-			InvokerData invoker,
-			ClientCall cc,
-			Ts3Client ts3Client,
-			TsFullClient ts3FullClient,
-			string[] parts,
-			string target) {
-			foreach (string part in parts) {
+			Uid uid,
+			string message,
+			ClientCall cc = null,
+			string listId = null,
+			bool front = false
+		) {
+			var parts = Regex.Split(message, ";+");
+			if (parts.Length == 0) {
+				throw new CommandException("No queries specified.", CommandExceptionReason.CommandError);
+			}
+			
+			if (cc != null) {
+				// Send update.
+
+				var pluralS = parts.Length == 1 ? "" : "s";
+				var msg = $"Received your request to add {parts.Length} song{pluralS} to ";
+				if (listId != null) {
+					msg += $"the playlist '{listId}'";
+				} else {
+					msg += $"the queue";
+				}
+				msg += ", processing...";
+				
+				ClientUtility.SendMessage(ts3Client, cc, msg);
+			}
+			
+			var results = new List<QueryResult>();
+			foreach (var part in parts) {
 				// Skip if empty
 				if (part == "") {
-					return;
-				}
-				
-				// Check if URL
-				string query = part.Replace("[URL]", "").Replace("[/URL]", "").Trim(' ');
-				
-				var match = Regex.Match(query, SPOTIFY_TRACK_URL_REGEX);
-				if (match.Success) {
-					query = "spotify:track:" + match.Groups[1];
+					continue;
 				}
 
-				if (
-					Regex.Match(query, YOUTUBE_URL_REGEX).Success
-					|| Regex.Match(query, SPOTIFY_TRACK_URI_REGEX).Success
-				) {
-					ifUrl(
-						playlistManager, playManager, execInfo, invoker.ClientUid,
-						resolver, cc, ts3Client, ts3FullClient, query, target
-					);
+				var result = DispatchQuery(uid, execInfo, part, listId, front);
+				if (!result.Ok) {
+					if (cc != null) {
+						// Send update.
+						ClientUtility.SendMessage(ts3Client, cc, result.Error.ToString());
+					}
+					
+					results.Add(new QueryResult(false, result.Error.ToString()));
 				} else {
-					ifQuery(playlistManager, playManager, execInfo, invoker.ClientUid, resolver, cc, ts3Client, ts3FullClient,
-						query, target);
+					if (cc != null) {
+						// Send update.
+						ClientUtility.SendMessage(ts3Client, cc, result.Value);
+					}
+					
+					results.Add(new QueryResult(true, result.Value));	
 				}
 			}
+
+			return new JsonArray<QueryResult>(results, elements => {
+				if (cc != null) {
+					return "Finished processing your query.";
+				}
+
+				var successes = new List<string>();
+				var fails = new List<string>();
+
+				foreach (var entry in elements) {
+					if (entry.Success) {
+						successes.Add(entry.Message);
+					} else {
+						fails.Add(entry.Message);
+					}
+				}
+
+				var messageBuilder = new StringBuilder();
+			
+				messageBuilder.Append($"Processed {successes.Count} queries successfully:\n");
+				messageBuilder.Append(string.Join("\n", successes));
+				messageBuilder.Append("\n");
+				messageBuilder.Append($"Failed to process {fails.Count} queries:\n");
+				messageBuilder.Append(string.Join("\n", fails));
+
+				return messageBuilder.ToString();
+			});
+		}
+
+		private R<string, LocalStr> DispatchQuery(
+			Uid uid,
+			ExecutionInformation execInfo,
+			string query,
+			string listId = null,
+			bool front = false
+		) {
+			// Remove BB-Codes and unnecessary whitespace.
+			var cleanedQuery = query.Replace("[URL]", "").Replace("[/URL]", "").Trim(' ');
+
+			string url = null;
+			var spotifyUrlMatch = Regex.Match(query, SpotifyTrackUrlRegex);
+			if (spotifyUrlMatch.Success) {
+				url = "spotify:track:" + spotifyUrlMatch.Groups[1];
+			} else if (
+				Regex.Match(cleanedQuery, YoutubeUrlRegex).Success
+				|| Regex.Match(cleanedQuery, SpotifyTrackUriRegex).Success
+			) {
+				url = cleanedQuery;
+			}
+
+			if (url != null) {
+				return AddUrl(uid, execInfo, url, listId, front);
+			}
+			
+			// It's a search query.
+			string type;
+			string actualQuery;
+			var elements = query.Split(":", 2);
+			
+			if (elements.Length < 2) {
+				// No search type specified. Use youtube by default.
+				type = "youtube";
+				actualQuery = query;
+			} else {
+				type = elements[0];
+				actualQuery = elements[1];
+			}
+			
+			return AddBySearch(uid, execInfo, type, actualQuery, listId, front);
 		}
 
 		private static string ComposeAddMessage(PlayManager playManager) {
-			PlayQueue queue = playManager.Queue;
-			int realIndex = queue.Items.Count - 1;
-			int index = realIndex - queue.Index;
-			return "Added '" + queue.Items[realIndex].AudioResource.ResourceTitle + "' at queue position " + index;
+			var queue = playManager.Queue;
+			var realIndex = queue.Items.Count - 1;
+			var index = realIndex - queue.Index;
+
+			return $"Added '{queue.Items[realIndex].AudioResource.ResourceTitle}' at queue position {index}.";
 		}
 
-		private static void PrintAddMessage(Ts3Client ts3Client, ClientCall cc, PlayManager playManager) {
-			ClientUtility.SendMessage(ts3Client, cc, ComposeAddMessage(playManager)); // This will fail if async
-		}
-
-		private static void SendAddFailure(Ts3Client ts3Client, string query, LocalStr error, ClientCall client) {
-			ClientUtility.SendMessage(ts3Client, client, "Error occured for + '" + query + "': " + error);
-			if (client == null) {
-				throw new CommandException(error.ToString(), CommandExceptionReason.CommandError);
-			}
-		}
-
-		private static string AddUrl(
-			PlaylistManager playlistManager,
-			PlayManager playManager,
-			ExecutionInformation info,
+		private R<string, LocalStr> AddUrl(
 			Uid uid,
-			ResolveContext resolver,
-			ClientCall cc,
-			Ts3Client ts3Client,
-			TsFullClient ts3FullClient,
+			ExecutionInformation execInfo,
 			string url,
-			string target = null,
-			bool silent = false,
-			Dictionary<string, string> additionalData = null) {
-			
-			R<PlayResource, LocalStr> resource;
-			if (silent) {
-				resource = resolver.Load(url);
-				playManager.Enqueue(resource.UnwrapThrow().BaseData, new MetaData(uid)).UnwrapThrow();
-				return ComposeAddMessage(playManager);
+			string listId = null,
+			bool front = false
+		) {
+			var resource = resolver.Load(url);
+			if (!resource.Ok) {
+				return resource.Error;
 			}
 
-			if (cc == null) {
+			return AddResource(resource.Value.BaseData, uid, execInfo, listId, front);
+		}
+		
+		private R<string, LocalStr> AddBySearch(
+			Uid uid,
+			ExecutionInformation execInfo,
+			string type,
+			string query,
+			string listId = null,
+			bool front = false
+		) {
+			var searchResult = resolver.Search(type, query);
+			if (!searchResult.Ok) {
+				return searchResult.Error;
+			}
+
+			if (searchResult.Value.Count == 0) {
+				return new LocalStr($"No Results returned from '{type}' for search '{query}'");
+			}
+
+			return AddResource(searchResult.Value[0], uid, execInfo, listId, front);
+		}
+
+		private R<string, LocalStr> AddResource(
+			AudioResource resource,
+			Uid uid,
+			ExecutionInformation execInfo,
+			string listId = null,
+			bool front = false
+		) {
+			if (front && listId != null) {
 				throw new CommandException(
-					"Tried to call AddURL with invalid parameter combination 'cc == null' and 'silent == false'.",
+					"Fronting into a playlist is not supported.",
 					CommandExceptionReason.CommandError
 				);
 			}
-
-			resource = resolver.Load(url);
-			if (!resource.Ok) {
-				SendAddFailure(ts3Client, url, resource.Error, cc);
-			}
-
-			var res = playManager.Enqueue(resource.Value.BaseData, new MetaData(uid));
-			if (res.Ok) {
-				PrintAddMessage(ts3Client, cc, playManager);
-			} else {
-				SendAddFailure(ts3Client, url, res.Error, cc);
-			}
-
-			// Only reached of not silent.
-			return null;
-		}
-
-		private static string AddQuery(
-			PlaylistManager playlistManager,
-			PlayManager playManager,
-			ExecutionInformation info,
-			Uid uid,
-			ResolveContext resolver,
-			ClientCall cc,
-			Ts3Client ts3Client,
-			TsFullClient ts3FullClient,
-			string query,
-			string target = null,
-			bool silent = false,
-			Dictionary<string, string> additionalData = null) {
-
-			IList<AudioResource> result;
-			if (silent) {
-				result = resolver.Search("youtube", query).UnwrapThrow();
-			} else {
-				if (cc == null) {
-					throw new CommandException(
-						"Tried to call AddQuery with invalid parameter combination 'cc == null' and 'silent == false'.",
-						CommandExceptionReason.CommandError
-					);
+			
+			// Add to front of queue if requested, but only if there is something playing right now.
+			// Thats because EnqueueAsNextSong() is programmed to break if used when nothing is playing.
+			if (front) {
+				if (playManager.IsPlaying) {
+					playManager.EnqueueAsNextSong(new QueueItem(resource, new MetaData(uid)));
+				} else {
+					playManager.Enqueue(resource, new MetaData(uid));
 				}
 
-				var r = resolver.Search("youtube", query);
-				if (!r.Ok) {
-					SendAddFailure(ts3Client, query, r.Error, cc);
-					return null;
+				return $"Added '{resource.ResourceTitle}' to the front of the queue.";
+			} 
+			
+			// Add to queue if no list id given.
+			if (listId == null) {
+				var result = playManager.Enqueue(resource, new MetaData(uid));
+				if (!result.Ok) {
+					return result.Error;
 				}
-				result = r.Value;
-			}
 
-			if (result.Count == 0) {
-				SendAddFailure(ts3Client, query, new LocalStr($"Youtube returned no results for query '{query}'"), cc);
-				return null;
-			}
-
-			AudioResource audioResource = result[0];
-			if (silent) {
-				playManager.Enqueue(audioResource, new MetaData(uid)).UnwrapThrow();
 				return ComposeAddMessage(playManager);
 			}
-
-			var res = playManager.Enqueue(audioResource, new MetaData(uid));
-			if (res.Ok) {
-				PrintAddMessage(ts3Client, cc, playManager);
-			} else {
-				SendAddFailure(ts3Client, query, res.Error, cc);
+			
+			// Otherwise, add to list.
+			if (execInfo == null) {
+				return new LocalStr(
+					$"Tried to add '{resource.ResourceTitle}' to playlist '{listId}' without execution information."
+				);
+			}
+			
+			R<int> addResult;
+			try {
+				addResult = MainCommands.ListAddItem(playlistManager, execInfo, listId, resource);
+			} catch (CommandException e) {
+				return new LocalStr(e.Message);
 			}
 
-			// Only reached if not silent
-			return null;
-		}
+			if (!addResult.Ok) {
+				return $"Error occured for '{resource.ResourceTitle}': Already contained in the playlist";
+			}
 
+			return $"Added '{resource.ResourceTitle}' to playlist '{listId}' at position {addResult.Value}.";
+		}
+		
 		public class LoggingHandler : DelegatingHandler {
 			public LoggingHandler(HttpMessageHandler innerHandler)
 				: base(innerHandler) { }
@@ -591,159 +631,11 @@ namespace KDFCommands {
 			}
 		}
 
-		[Command("list add")]
-		public static void CommandListAdd(
-			PlayManager playManager,
-			PlaylistManager playlistManager,
-			ExecutionInformation execInfo,
-			ResolveContext resolver,
-			InvokerData invoker,
-			ClientCall cc,
-			Ts3Client ts3Client,
-			TsFullClient ts3FullClient,
-			string userProvidedId,
-			string message) {
-			if(!playlistManager.TryGetPlaylistId(userProvidedId, out var id))
-				throw new CommandException($"The playlist {userProvidedId} does not exist.", CommandExceptionReason.CommandError);
-
-			string[] parts = Regex.Split(message, ";+");
-			ClientUtility.SendMessage(ts3Client, cc,
-				"Received your request to add " + parts.Length + " songs to the playlist '" + id +
-				"', processing...");
-
-			PartHandler urlHandler = ListAddUrl;
-			PartHandler queryHandler = ListAddQuery;
-			ParseMulti(urlHandler, queryHandler, playManager, playlistManager, execInfo, resolver, invoker, cc,
-				ts3Client, ts3FullClient, parts, id);
-		}
-		
 		[Command("list createwithuid")]
 		public static void CommandListCreateWithUid(PlaylistManager playlistManager, TsFullClient ts3FullClient, string uidStr, string listId) {
-			// Check if user exists, throws exception if not.
-			Uid uid = Uid.To(uidStr);
-			ClientUtility.GetClientNameFromUid(ts3FullClient, uid);
-			MainCommands.CommandListCreate(playlistManager, new InvokerData(uid), listId);
+			MainCommands.CommandListCreate(playlistManager, new InvokerData(GetValidUid(ts3FullClient, null, uidStr)), listId);
 		}
 		
-		[Command("list addwithuid")]
-		public static void CommandListAddWithUid(
-			PlayManager playManager,
-			PlaylistManager playlistManager,
-			ExecutionInformation execInfo,
-			ResolveContext resolver,
-			Ts3Client ts3Client,
-			TsFullClient ts3FullClient,
-			string uidStr,
-			string userProvidedId,
-			string message) {
-
-			// Check if user exists, throws exception if not.
-			Uid uid = Uid.To(uidStr);
-			ClientUtility.GetClientNameFromUid(ts3FullClient, uid);
-			CommandListAdd(playManager, playlistManager, execInfo, resolver, new InvokerData(uid), null, ts3Client, ts3FullClient, userProvidedId, message);
-		}
-
-		private static string ListAddUrl(
-			PlaylistManager playlistManager,
-			PlayManager playManager,
-			ExecutionInformation info,
-			Uid uid,
-			ResolveContext resolver,
-			ClientCall cc,
-			Ts3Client ts3Client,
-			TsFullClient ts3FullClient,
-			string url,
-			string target = null,
-			bool silent = false,
-			Dictionary<string, string> additionalData = null) {
-
-			int index;
-			string title;
-			try {
-				var playResource = resolver.Load(url).UnwrapThrow();
-				title = playResource.BaseData.ResourceTitle;
-				if (additionalData != null) {
-					foreach (var (key, value) in additionalData) {
-						playResource.BaseData.AdditionalData.TryAdd(key, value);
-					}
-				}
-
-				var r = MainCommands.ListAddItem(playlistManager, info, target, playResource.BaseData);
-				if (!r.Ok) {
-					ClientUtility.SendMessage(ts3Client, cc, "Error occured for '" + url + "': Already contained in the playlist");
-					return null;
-				}
-
-				index = r.Value;
-			} catch (CommandException e) {
-				ClientUtility.SendMessage(ts3Client, cc, "Error occured for '" + url + "': " + e.Message);
-				return null;
-			}
-
-			ClientUtility.SendMessage(ts3Client, cc,
-				"Added '" + title +
-				"' to playlist '" + target +
-				"' at position " + index
-			);
-			return null;
-		}
-
-		internal static string ListAddQuery(
-			PlaylistManager playlistManager,
-			PlayManager playManager,
-			ExecutionInformation info,
-			Uid uid,
-			ResolveContext resolver,
-			ClientCall cc,
-			Ts3Client ts3Client,
-			TsFullClient ts3FullClient,
-			string query,
-			string target = null,
-			bool silent = false,
-			Dictionary<string, string> additionalData = null) {
-
-			var result = resolver.Search("youtube", query);
-			if (!result.Ok) {
-				SendAddFailure(ts3Client, query, result.Error, cc);
-				return null;
-			}
-
-			AudioResource audioResource = result.Value[0];
-			if (additionalData != null) {
-				foreach (var (key, value) in additionalData) {
-					audioResource.AdditionalData.TryAdd(key, value);
-				}
-			}
-			
-			int index;
-			try {
-				var r = MainCommands.ListAddItem(playlistManager, info, target, audioResource);
-				if (!r.Ok) {
-					ClientUtility.SendMessage(ts3Client, cc, "Error occured for '" + query + "': Already contained in the playlist");
-					if (cc == null) {
-						throw new CommandException("Song already is in the playlist.", CommandExceptionReason.CommandError);
-					}
-					return null;
-				}
-
-				index = r.Value;
-			} catch (CommandException e) {
-				ClientUtility.SendMessage(ts3Client, cc, "Error occured for '" + query + "': " + e.Message);
-				if (cc == null) {
-					throw new CommandException(e.Message, CommandExceptionReason.CommandError);
-				}
-				return null;
-			}
-
-			ClientUtility.SendMessage(ts3Client, cc,
-				"Added '" + audioResource.ResourceTitle +
-				"' for your request '" + query +
-				"' to playlist '" + target +
-				"' at position " + index
-			);
-			return null;
-		}
-
 		private static SortedSet<int> ParseIndicesInBounds(string indicesString, int lower, int upper) {
 			SortedSet<int> indices = new SortedSet<int>();
 			if (upper < lower)
@@ -794,24 +686,18 @@ namespace KDFCommands {
 			return new SortedSet<int>(ParseIndicesInBounds(indicesString, 1, playQueue.Items.Count - playQueue.Index - 1).Select(entry => entry + playQueue.Index));
 		}
 		
-		[Command("delwithuid")]
-		public static string CommandDeleteWithUid(PlayManager playManager, CallerInfo ci, ExecutionInformation info, TsFullClient ts3FullClient, string uidStr, string idList) {
-			// Check if user exists, throws exception if not.
-			Uid uid = Uid.To(uidStr);
-			ClientUtility.GetClientNameFromUid(ts3FullClient, uid);
-			return CommandDeleteInternal(playManager, ci, info, uid, idList);
-		}
-
 		[Command("del")]
-		public static string CommandDelete(PlayManager playManager, CallerInfo ci, ExecutionInformation info, InvokerData invoker, string idList) {
-			return CommandDeleteInternal(playManager, ci, info, invoker.ClientUid, idList);
+		public string CommandDelete(
+			CallerInfo ci,
+			ExecutionInformation info, 
+			InvokerData invoker,
+			string idList, 
+			string uidStr = null
+		) {
+			return CommandDeleteInternal(playManager, ci, info, GetValidUid(invoker, uidStr), idList);
 		}
 	
 		private static string CommandDeleteInternal(PlayManager playManager, CallerInfo ci, ExecutionInformation info, Uid uid, string idList) {
-			if (uid.ToString() == "Anonymous") {
-				throw new CommandException("You can't delete songs as anonymous user.", CommandExceptionReason.Unauthorized);
-			}
-			
 			var queue = playManager.Queue;
 			var currentSongIndex = queue.Index;
 
@@ -927,31 +813,31 @@ namespace KDFCommands {
 			};
 		}
 
-		[Command("queuewithuid")]
-		public JsonValue<CurrentQueueInfo> CommandQueueWithUid(
-			ExecutionInformation info,
-			string uidStr) {
-
-			// If the uid is garbage, the queue will be completely hidden.
-			return CommandQueueInternal(Uid.To(uidStr), info);
-		}
-
-		[Command("queue")]
-		public JsonValue<CurrentQueueInfo> CommandQueue(
+		[Command("showqueue")]
+		public JsonValue<CurrentQueueInfo> CommandShowQueue(
 			InvokerData invoker,
 			ExecutionInformation info,
-			string arg = null) {
-			return CommandQueueInternal(invoker.ClientUid, info, arg);
+			string uidStr = null
+		) {
+			return CommandQueueInternal(GetValidUid(invoker, uidStr), info);
+		}
+		
+		[Command("showfullqueue")]
+		public JsonValue<CurrentQueueInfo> CommandShowFullQueue(
+			InvokerData invoker,
+			ExecutionInformation info,
+			string uidStr = null
+		) {
+			return CommandQueueInternal(GetValidUid(invoker, uidStr), info, false);
 		}
 
-		public JsonValue<CurrentQueueInfo> CommandQueueInternal(Uid uid, ExecutionInformation info = null, string arg = null) {
-			bool hideSongsOfOthers = arg != "full";
-			if (!hideSongsOfOthers && (info == null || !info.HasRights(RightOverrideQueueCommandCheck)))
+		public JsonValue<CurrentQueueInfo> CommandQueueInternal(Uid uid, ExecutionInformation info = null, bool hideOthers = true) {
+			if (!hideOthers && (info == null || !info.HasRights(RightOverrideQueueCommandCheck)))
 				throw new CommandException("You have no permission to view the full queue.",
 					CommandExceptionReason.CommandError);
 			var queueInfo = new CurrentQueueInfo();
 			lock (playManager) {
-				bool ShouldRestrict(QueueItem qi) => hideSongsOfOthers && qi.MetaData.ResourceOwnerUid != uid;
+				bool ShouldRestrict(QueueItem qi) => hideOthers && qi.MetaData.ResourceOwnerUid != uid;
 				queueInfo.Items = playManager.Queue.Items.Skip(playManager.Queue.Index + 1)
 					.Select(qi => ToQueueItemInfo(qi, ShouldRestrict(qi))).ToList();
 				if (playManager.IsPlaying)
@@ -962,8 +848,7 @@ namespace KDFCommands {
 		}
 
 		[Command("recentlyplayed")]
-		public JsonArray<QueueItemInfo> CommandRecentlyPlayed(
-			PlayManager playManager, int? count) {
+		public JsonArray<QueueItemInfo> CommandRecentlyPlayed(int? count) {
 			List<QueueItemInfo> items;
 			lock (playManager) {
 				int start = Math.Max(0, playManager.Queue.Index - count ?? 5);
@@ -1014,73 +899,54 @@ namespace KDFCommands {
 		}
 
 		[Command("front")]
-		public static string CommandYoutubeFront(
-			PlayManager playManager,
-			PlaylistManager playlistManager,
+		public JsonArray<QueryResult> CommandFront(
 			ExecutionInformation execInfo,
-			ResolveContext resolver,
 			InvokerData invoker,
-			ClientCall cc,
-			Ts3Client ts3Client,
-			TsFullClient ts3FullClient,
-			string message) {
-			// If the current song is the last in the queue, add normally
-			var queue = playManager.Queue;
-
-			if (queue.Index == queue.Items.Count || queue.Index == queue.Items.Count - 1) {
-				CommandYoutube(playManager, playlistManager, execInfo, resolver, invoker, cc, ts3Client, ts3FullClient,
-					message);
-				return null;
-			}
-
-			// The index of front is outside of the queue, reject
-			if (queue.Index + 1 >= queue.Items.Count) {
-				// is that even possible?
-				throw new CommandException("The index of the front would be outside of the queue!",
-					CommandExceptionReason.CommandError);
-			}
-
-			AudioResource resource;
-
-			// Check if URL
-			var query = message.Replace("[URL]", "").Replace("[/URL]", "").Trim(' ');
-			if (Regex.Match(query, YOUTUBE_URL_REGEX).Success) {
-				resource = resolver.Load(query, "youtube").UnwrapThrow().BaseData;
-			} else {
-				var result = resolver.Search("youtube", query).UnwrapThrow();
-				resource = result[0];
-			}
-
-			MetaData meta = new MetaData(invoker.ClientUid);
-			playManager.EnqueueAsNextSong(new QueueItem(resource, meta));
-			return "Added '" + resource.ResourceTitle + "' to the front of the queue.";
+			string message,
+			ClientCall cc = null
+		) {
+			return ProcessQueries(execInfo, GetValidUid(invoker, null), message, cc, front: true);
+		}
+		
+		[Command("frontwithuid")]
+		public JsonArray<QueryResult> CommandFront(
+			ExecutionInformation execInfo,
+			InvokerData invoker,
+			string uidStr,
+			string message,
+			ClientCall cc = null
+		) {
+			return ProcessQueries(execInfo, GetValidUid(invoker, uidStr), message, cc, front: true);
 		}
 
 		[Command("list item queue")]
-		public static string CommandItemQueue(
-			InvokerData invoker, PlaylistManager playlistManager, PlayManager playManager, string userProvidedId,
-			string indicesString, string uid = null) {
-			var (plist, id) = playlistManager.GetPlaylist(userProvidedId).UnwrapThrow();
+		public string CommandItemQueue(
+			InvokerData invoker, 
+			string userProvidedId,
+			string indicesString, string uidStr = null
+		) {
+			var (plist, listId) = playlistManager.GetPlaylist(userProvidedId).UnwrapThrow();
 			var indices = ParseIndicesInBounds(indicesString, 0, plist.Count - 1);
 			var items = new List<AudioResource>(indices.Count);
 			items.AddRange(indices.Select(index => plist[index]));
 
-			playManager.Enqueue(items,
-				new MetaData(uid != null ? Uid.To(uid) : invoker.ClientUid, id)).UnwrapThrow();
+			playManager.Enqueue(items, new MetaData(GetValidUid(invoker, uidStr), listId)).UnwrapThrow();
 
 			if (indices.Count == 1) {
-				return $"Queued '{items[0].ResourceTitle}' from playlist {id}.";
+				return $"Queued '{items[0].ResourceTitle}' from playlist {listId}.";
 			}
 
-			return $"Queued {items.Count} items from playlist {id}.";
+			return $"Queued {items.Count} items from playlist {listId}.";
 		}
 		
 		[Command("list item front")]
-		public static string CommandItemFront(
-			InvokerData invoker, PlaylistManager playlistManager, PlayManager playManager, 
-			string userProvidedId, string indicesString, string uid = null) {
-
-			var (plist, id) = playlistManager.GetPlaylist(userProvidedId).UnwrapThrow();
+		public string CommandItemFront(
+			InvokerData invoker,
+			string userProvidedId,
+			string indicesString, 
+			string uidStr = null
+		) {
+			var (plist, _) = playlistManager.GetPlaylist(userProvidedId).UnwrapThrow();
 			var indices = ParseIndicesInBounds(indicesString, 0, plist.Count - 1);
 
 			if (indices.Count != 1) {
@@ -1088,7 +954,7 @@ namespace KDFCommands {
 			}
 
 			var resource = plist[indices.First()];
-			playManager.EnqueueAsNextSong(new QueueItem(resource, new MetaData(uid != null ? Uid.To(uid) : invoker.ClientUid, id)));
+			playManager.EnqueueAsNextSong(new QueueItem(resource, new MetaData(GetValidUid(invoker, uidStr))));
 			return "Added '" + resource.ResourceTitle + "' to the front of the queue.";
 		}
 		
@@ -1164,40 +1030,32 @@ namespace KDFCommands {
 		}
 
 		[Command("autofillstatus")]
-		public JsonValue<AutofillStatus> CommandAutofillStatus() { return Autofill.Status(); }
-
-		[Command("autofilloff")]
-		public void CommandAutofillOff(InvokerData invoker) {
-			Autofill.Disable(invoker.ClientUid);
+		public JsonValue<AutofillStatus> CommandAutofillStatus() {
+			return Autofill.Status();
 		}
 
-		[Command("autofilloffwithuid")]
-		public void CommandAutofillOffWithUid(string uidStr) {
-			var uid = Uid.To(uidStr);
-			Autofill.Disable(uid);
+		[Command("autofilloff")]
+		public void CommandAutofillOff(InvokerData invoker, string uidStr = null) {
+			Autofill.Disable(GetValidUid(invoker, uidStr));
 		}
 
 		[Command("autofill")]
 		public void CommandAutofill(InvokerData invoker, string[] playlistIds = null) {
-			if (invoker.IsAnonymous) {
-				throw new CommandException("An anonymous user can't enable autofill", CommandExceptionReason.CommandError);
-			}
-			Autofill.CommandAutofill(invoker.ClientUid, playlistIds);
+			Autofill.CommandAutofill(GetValidUid(invoker, null), playlistIds);
 		}
-
+		
 		[Command("autofillwithuid")]
-		public void CommandAutofillWithUid(string uidStr, string[] playlistIds = null) {
-			var uid = Uid.To(uidStr);
-			Autofill.CommandAutofill(uid, playlistIds);
+		public void CommandAutofillWithUid(InvokerData invoker, string uidStr, string[] playlistIds = null) {
+			Autofill.CommandAutofill(GetValidUid(invoker, uidStr), playlistIds);
 		}
 
-		private static void ThrowNotInSameChannel() {
-			throw new CommandException("You have to be in the same channel as the bot to use votes.", CommandExceptionReason.CommandError);
-		}
-
-		[Command("skiporvoteskipwithuid")]
-		public JsonValue<Voting.Result> CommandStartVoteWithUid(ExecutionInformation info, string clientUid) {
-			var uid = Uid.To(clientUid);
+		[Command("skiporvoteskip")]
+		public JsonValue<Voting.Result> CommandSkipOrVoteSkip(
+			ExecutionInformation info, 
+			InvokerData invoker,
+			string uidStr = null
+		) {
+			var uid = GetValidUid(invoker, uidStr);
 
 			lock (playManager.Lock) {
 				var current = playManager.Queue.Current;
@@ -1214,35 +1072,31 @@ namespace KDFCommands {
 				}
 			}
 			
-			return CommandStartVoteWithUid(info, uid.Value, "skip", null);
+			return StartVote(info, uid, "skip", null);
 		}
 
 		[Command("votewithuid")]
 		public JsonValue<Voting.Result> CommandStartVoteWithUid(
 			ExecutionInformation info,
-			string clientUid, string command, string? args = null) {
-			var uid = Uid.To(clientUid);
-
-			// var botChannel = ts3FullClient.Book.CurrentChannel().Id;
-			// var hasClientWithUidInBotChannel = ClientUtility.GetClientsByUidOnline(ts3FullClient, uid).Any(c => botChannel == c.Channel);
-			// if (!hasClientWithUidInBotChannel)
-				// ThrowNotInSameChannel();
-
-			return CommandStartVote(info, uid, command, args);
+			InvokerData invoker,
+			string uidStr, 
+			string command,
+			string args = null
+		) {
+			return StartVote(info, GetValidUid(invoker, uidStr), command, args);
 		}
 
 		[Command("vote")]
-		public JsonValue<Voting.Result> CommandStartVote(ExecutionInformation info, ClientCall invoker, string command, string? args = null) {
-			if (!invoker.ChannelId.HasValue)
-				throw new CommandException("Could not get user channel", CommandExceptionReason.InternalError);
-			// var botChannel = ts3FullClient.Book.CurrentChannel().Id;
-			// if (botChannel != invoker.ChannelId.Value)
-				// ThrowNotInSameChannel();
-
-			return CommandStartVote(info, invoker.ClientUid, command, args);
+		public JsonValue<Voting.Result> CommandVote(
+			ExecutionInformation info, 
+			InvokerData invoker, 
+			string command,
+			string args = null
+		) {
+			return StartVote(info, invoker.ClientUid, command, args);
 		}
 
-		private JsonValue<Voting.Result> CommandStartVote(ExecutionInformation info, Uid client, string command, string args) {
+		private JsonValue<Voting.Result> StartVote(ExecutionInformation info, Uid client, string command, string args) {
 			var res = Voting.CommandVote(info, client, command, args);
 			return new JsonValue<Voting.Result>(res, r => null);
 		}
@@ -1356,7 +1210,7 @@ namespace KDFCommands {
 		}
 
 		[Command("recalcgain")]
-		public string CommandRecalculateGain(ResolveContext resolver, ClientCall cc) {
+		public string CommandRecalculateGain(ClientCall cc) {
 			const string flagKey = "fully_analysed";
 
 			// Already running.
@@ -1522,6 +1376,26 @@ namespace KDFCommands {
 			return $"Started gain recalculation for {recalcGainInfo.ToProcessEstimate}/{recalcGainInfo.DbSize} elements.";
 		}
 
+		private Uid GetValidUid(InvokerData invoker, string uidStr) {
+			return GetValidUid(ts3FullClient, invoker, uidStr);
+		}
+		
+		private static Uid GetValidUid(TsFullClient ts3FullClient, InvokerData invoker, string uidStr) {
+			Uid uid;
+			if (uidStr != null) {
+				uid = Uid.To(uidStr);
+
+				// Check if user exists, throws exception if not.
+				ClientUtility.GetClientNameFromUid(ts3FullClient, uid);	
+			} else if (invoker != null && !invoker.IsAnonymous) {
+				uid = invoker.ClientUid;
+			} else {
+				throw new CommandException("No valid uid given.", CommandExceptionReason.CommandError);
+			}
+			
+			return uid;
+		}
+
 		public class TwitchInfo {
 			[JsonProperty("ViewerCount")]
 			public long ViewerCount { get; set; }
@@ -1549,6 +1423,16 @@ namespace KDFCommands {
 			
 			[JsonProperty("IssuerName")]
 			public string IssuerName { get; set; }
+		}
+		
+		public class QueryResult {
+			public bool Success { get; }
+			public string Message { get; }
+			
+			public QueryResult(bool success, string message) {
+				Success = success;
+				Message = message;
+			}
 		}
 
 		private class RecalcGainInfo {

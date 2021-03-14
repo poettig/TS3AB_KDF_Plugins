@@ -49,8 +49,10 @@ namespace KDFCommands {
 		}
 
 		public static void SendMessage(Ts3Client client, ClientCall cc, string message) {
-			if (cc?.ClientId == null)
+			if (cc?.ClientId == null) {
 				return;
+			}
+
 			client.SendMessage(message, cc.ClientId.Value);
 		}
 

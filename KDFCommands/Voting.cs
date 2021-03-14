@@ -273,10 +273,7 @@ namespace KDFCommands {
 				{SkipRightsChecks = true, CommandComplexityMax = config.Commands.CommandComplexity};
 		}
 
-		public Result CommandVote(
-			ExecutionInformation info,
-			Uid invoker, string command, string? args = null) {
-
+		public Result CommandVote(ExecutionInformation info, Uid invoker, string command, string args = null) {
 			command = command.ToLower();
 			if (string.IsNullOrWhiteSpace(command))
 				throw new CommandException("No command to vote for given.", CommandExceptionReason.CommandError);
