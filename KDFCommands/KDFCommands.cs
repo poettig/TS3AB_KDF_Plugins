@@ -36,10 +36,6 @@ namespace KDFCommands {
 				{RightOverrideQueueCommandCheck, RightDeleteOther, RightSkipOther};
 		}
 
-		private const string YoutubeUrlRegex =
-			"^(?:https?:\\/\\/)?(?:www\\.)?(?:youtube\\.com\\/watch\\?.*?v=(.*?)(?:&.*)*|youtu\\.be\\/(.*?)\\??.*)$";
-		private const string SpotifyTrackUriRegex = "^spotify:track:.*$";
-		private const string SpotifyTrackUrlRegex = "https:\\/\\/open\\.spotify\\.com\\/track\\/([A-Za-z0-9]+)\\??.*$";
 		private const string TruncatedMessage =
 			"\nThe number of songs to add was reduced compared to your request.\n" +
 			"This can happen because the requested number of songs was not evenly divisible by the number of playlists " +
@@ -468,39 +464,36 @@ namespace KDFCommands {
 			string listId = null,
 			bool front = false
 		) {
-			// Remove BB-Codes and unnecessary whitespace.
-			var cleanedQuery = query.Replace("[URL]", "").Replace("[/URL]", "").Trim(' ');
-
-			string url = null;
-			var spotifyUrlMatch = Regex.Match(query, SpotifyTrackUrlRegex);
-			if (spotifyUrlMatch.Success) {
-				url = "spotify:track:" + spotifyUrlMatch.Groups[1];
-			} else if (
-				Regex.Match(cleanedQuery, YoutubeUrlRegex).Success
-				|| Regex.Match(cleanedQuery, SpotifyTrackUriRegex).Success
-			) {
-				url = cleanedQuery;
-			}
-
-			if (url != null) {
-				return AddUrl(uid, execInfo, url, listId, front);
+			var trimmedQuery = query.Trim();
+			
+			// Try to interpret it as URL.
+			var resource = resolver.Load(trimmedQuery);
+			if (resource.Ok) {
+				return AddResource(resource.Value.BaseData, uid, execInfo, listId, front);
 			}
 			
-			// It's a search query.
+			// Was not interpretable as URL, try search.
 			string type;
 			string actualQuery;
-			var elements = query.Split(":", 2);
+			var elements = trimmedQuery.Split(":", 2);
 			
 			if (elements.Length < 2) {
 				// No search type specified. Use youtube by default.
 				type = "youtube";
-				actualQuery = query;
+				actualQuery = trimmedQuery;
 			} else {
 				type = elements[0];
 				actualQuery = elements[1];
 			}
 			
-			return AddBySearch(uid, execInfo, type, actualQuery, listId, front);
+			var searchResult = AddBySearch(uid, execInfo, type, actualQuery, listId, front);
+			if (searchResult.Ok) {
+				return searchResult.Value;
+			}
+
+			return new LocalStr(
+				$"Neither adding via URL ({resource.Error}) nor search ({searchResult.Error}) was successful."
+			);
 		}
 
 		private static string ComposeAddMessage(PlayManager playManager) {
@@ -511,21 +504,6 @@ namespace KDFCommands {
 			return $"Added '{queue.Items[realIndex].AudioResource.ResourceTitle}' at queue position {index}.";
 		}
 
-		private R<string, LocalStr> AddUrl(
-			Uid uid,
-			ExecutionInformation execInfo,
-			string url,
-			string listId = null,
-			bool front = false
-		) {
-			var resource = resolver.Load(url);
-			if (!resource.Ok) {
-				return resource.Error;
-			}
-
-			return AddResource(resource.Value.BaseData, uid, execInfo, listId, front);
-		}
-		
 		private R<string, LocalStr> AddBySearch(
 			Uid uid,
 			ExecutionInformation execInfo,
