@@ -360,9 +360,10 @@ namespace KDFCommands {
 			ExecutionInformation execInfo,
 			InvokerData invoker,
 			string message,
+			bool skipsearch = false,
 			ClientCall cc = null
 		) {
-			return ProcessQueries(execInfo, GetValidUid(invoker, null), message, cc);
+			return ProcessQueries(execInfo, GetValidUid(invoker, null), message, cc, skipsearch: skipsearch);
 		}
 		
 		[Command("queuesongswithuid")]
@@ -371,9 +372,10 @@ namespace KDFCommands {
 			InvokerData invoker,
 			string uidStr,
 			string message,
+			bool skipsearch = false,
 			ClientCall cc = null
 		) {
-			return ProcessQueries(execInfo, GetValidUid(invoker, uidStr), message, cc);
+			return ProcessQueries(execInfo, GetValidUid(invoker, uidStr), message, cc, skipsearch: skipsearch);
 		}
 
 		private JsonArray<QueryResult> ProcessQueries(
@@ -382,7 +384,8 @@ namespace KDFCommands {
 			string message,
 			ClientCall cc = null,
 			string listId = null,
-			bool front = false
+			bool front = false,
+			bool skipsearch = false
 		) {
 			var parts = Regex.Split(message, ";+");
 			if (parts.Length == 0) {
@@ -411,7 +414,7 @@ namespace KDFCommands {
 					continue;
 				}
 
-				var result = DispatchQuery(uid, execInfo, part, listId, front);
+				var result = DispatchQuery(uid, execInfo, part, listId, front, skipsearch);
 				if (!result.Ok) {
 					if (cc != null) {
 						// Send update.
@@ -462,7 +465,8 @@ namespace KDFCommands {
 			ExecutionInformation execInfo,
 			string query,
 			string listId = null,
-			bool front = false
+			bool front = false,
+			bool skipsearch = false
 		) {
 			var trimmedQuery = query.Trim();
 			
@@ -470,6 +474,11 @@ namespace KDFCommands {
 			var resource = resolver.Load(trimmedQuery);
 			if (resource.Ok) {
 				return AddResource(resource.Value.BaseData, uid, execInfo, listId, front);
+			}
+			
+			// Skip searching if requested.
+			if (skipsearch) {
+				return resource.Error;
 			}
 			
 			// Was not interpretable as URL, try search.
