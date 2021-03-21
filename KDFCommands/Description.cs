@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using TS3AudioBot;
@@ -68,7 +69,7 @@ namespace KDFCommands {
 				};
 				descUpdaterThread.Start();
 			}
-
+			
 			private void DescriptionUpdater(CancellationToken token) {
 				while (true) {
 					var data = Data;
@@ -76,7 +77,12 @@ namespace KDFCommands {
 						int queueLength = PlayManager.Queue.Items.Count - PlayManager.Queue.Index - 1;
 						TimeSpan timeLeft = Player.Length.Subtract(Player.Position);
 
-						Ts3Client.ChangeDescription(Data.MakeDescription(queueLength, timeLeft)).UnwrapThrow();
+						var description = Data.MakeDescription(queueLength, timeLeft);
+						if (description.Length > 200) {
+							description = description.Take(197) + "...";
+						}	
+						
+						Ts3Client.ChangeDescription(description).UnwrapThrow();
 					}
 
 					if (token.WaitHandle.WaitOne(1000))
