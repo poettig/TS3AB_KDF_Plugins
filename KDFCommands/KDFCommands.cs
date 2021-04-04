@@ -355,27 +355,71 @@ namespace KDFCommands {
 			return ProcessQueries(execInfo, GetValidUid(invoker, uidStr), message, cc, listId);
 		}
 		
+		[Command("list addurls")]
+		public JsonArray<QueryResult> CommandListAddUrls(
+			ExecutionInformation execInfo,
+			InvokerData invoker,
+			string listId,
+			string message,
+			ClientCall cc = null
+		) {
+			Log.Info($"[SPOTIFYDEBUG] Requesting to add ${listId}:${message}");
+			return ProcessQueries(execInfo, GetValidUid(invoker, null), message, cc, listId, skipsearch: true);
+		}
+		
+		[Command("list addurlswithuid")]
+		public JsonArray<QueryResult> CommandListAddUrls(
+			ExecutionInformation execInfo,
+			InvokerData invoker,
+			string uidStr,
+			string listId,
+			string message,
+			ClientCall cc = null
+		) {
+			Log.Info($"[SPOTIFYDEBUG] Requesting to add ${listId}:${message}");
+			return ProcessQueries(execInfo, GetValidUid(invoker, uidStr), message, cc, listId, skipsearch: true);
+		}
+		
 		[Command("queuesongs")]
-		public JsonArray<QueryResult> CommandQueueSong(
+		public JsonArray<QueryResult> CommandQueueSongs(
 			ExecutionInformation execInfo,
 			InvokerData invoker,
 			string message,
-			bool skipsearch = false,
 			ClientCall cc = null
 		) {
-			return ProcessQueries(execInfo, GetValidUid(invoker, null), message, cc, skipsearch: skipsearch);
+			return ProcessQueries(execInfo, GetValidUid(invoker, null), message, cc);
 		}
 		
 		[Command("queuesongswithuid")]
-		public JsonArray<QueryResult> CommandQueueSong(
+		public JsonArray<QueryResult> CommandQueueSongs(
 			ExecutionInformation execInfo,
 			InvokerData invoker,
 			string uidStr,
 			string message,
-			bool skipsearch = false,
 			ClientCall cc = null
 		) {
-			return ProcessQueries(execInfo, GetValidUid(invoker, uidStr), message, cc, skipsearch: skipsearch);
+			return ProcessQueries(execInfo, GetValidUid(invoker, uidStr), message, cc);
+		}
+		
+		[Command("queueurls")]
+		public JsonArray<QueryResult> CommandQueueUrls(
+			ExecutionInformation execInfo,
+			InvokerData invoker,
+			string message,
+			ClientCall cc = null
+		) {
+			return ProcessQueries(execInfo, GetValidUid(invoker, null), message, cc, skipsearch: true);
+		}
+		
+		[Command("queueurlswithuid")]
+		public JsonArray<QueryResult> CommandQueueUrls(
+			ExecutionInformation execInfo,
+			InvokerData invoker,
+			string uidStr,
+			string message,
+			ClientCall cc = null
+		) {
+			return ProcessQueries(execInfo, GetValidUid(invoker, uidStr), message, cc, skipsearch: true);
 		}
 
 		private JsonArray<QueryResult> ProcessQueries(
@@ -475,6 +519,8 @@ namespace KDFCommands {
 			if (resource.Ok) {
 				return AddResource(resource.Value.BaseData, uid, execInfo, listId, front);
 			}
+			
+			Log.Info($"[SPOTIFYDEBUG] Failed adding by resource: ${resource.Error}.");
 			
 			// Skip searching if requested.
 			if (skipsearch) {
@@ -578,13 +624,14 @@ namespace KDFCommands {
 			
 			R<int> addResult;
 			try {
+				Log.Info($"[SPOTIFYDEBUG] Adding ${listId}:${resource.ResourceTitle}");
 				addResult = MainCommands.ListAddItem(playlistManager, execInfo, listId, resource);
 			} catch (CommandException e) {
 				return new LocalStr(e.Message);
 			}
 
 			if (!addResult.Ok) {
-				return $"Error occured for '{resource.ResourceTitle}': Already contained in the playlist";
+				return $"Error occured for '{resource.ResourceTitle}': Already contained in the playlist.";
 			}
 
 			return $"Added '{resource.ResourceTitle}' to playlist '{listId}' at position {addResult.Value}.";
