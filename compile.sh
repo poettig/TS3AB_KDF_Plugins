@@ -28,6 +28,7 @@ isGitUpToDate() {
 compileBot() {
 	git pull || error "Failed to pull repository."
 	git submodule update --recursive || error "Failed to update submodules."
+	rm -rf TS3AudioBot/bin/*
 	dotnet build --framework netcoreapp3.1 --configuration "$1" TS3AudioBot || error "Compilation of TS3AudioBot failed."
 	rsync -a --progress --exclude=NLog.config TS3AudioBot/bin/"$1"/netcoreapp3.1/ ../../ || error "RSync failed."
 	cd ..

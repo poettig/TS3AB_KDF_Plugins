@@ -49,8 +49,6 @@ namespace KDFCommands {
 		private static readonly Random Random = new Random();
 		
 		public static IList<SongRandomizerResult> GetRandomSongs(int count, PlaylistManager playlistManager, HashSet<string> playlistSubset = null) {
-			Log.Error(playlistManager != null);
-			
 			// Get total number of songs from all selected playlists
 			var numSongs = 0;
 			var playlistsUnfiltered = playlistManager.GetAvailablePlaylists();
@@ -63,8 +61,6 @@ namespace KDFCommands {
 				playlists.Add(playlist);
 				numSongs += playlist.SongCount;
 			}
-			
-			Log.Error("LELELEL");
 			
 			var randomSongs = new List<SongRandomizerResult>();
 			for (var i = 0; i < count; i++) {

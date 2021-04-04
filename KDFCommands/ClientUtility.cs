@@ -44,6 +44,7 @@ namespace KDFCommands {
 			return R.Err;
 		}
 
+
 		public static bool ClientIsOnline(TsFullClient ts3FullClient, Uid uid) {
 			return GetFirstClientByUidOnline(ts3FullClient, uid).Ok;
 		}

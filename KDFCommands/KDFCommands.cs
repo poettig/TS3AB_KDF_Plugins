@@ -363,7 +363,6 @@ namespace KDFCommands {
 			string message,
 			ClientCall cc = null
 		) {
-			Log.Info($"[SPOTIFYDEBUG] Requesting to add ${listId}:${message}");
 			return ProcessQueries(execInfo, GetValidUid(invoker, null), message, cc, listId, skipsearch: true);
 		}
 		
@@ -376,7 +375,6 @@ namespace KDFCommands {
 			string message,
 			ClientCall cc = null
 		) {
-			Log.Info($"[SPOTIFYDEBUG] Requesting to add ${listId}:${message}");
 			return ProcessQueries(execInfo, GetValidUid(invoker, uidStr), message, cc, listId, skipsearch: true);
 		}
 		
@@ -520,8 +518,6 @@ namespace KDFCommands {
 				return AddResource(resource.Value.BaseData, uid, execInfo, listId, front);
 			}
 			
-			Log.Info($"[SPOTIFYDEBUG] Failed adding by resource: ${resource.Error}.");
-			
 			// Skip searching if requested.
 			if (skipsearch) {
 				return resource.Error;
@@ -624,7 +620,6 @@ namespace KDFCommands {
 			
 			R<int> addResult;
 			try {
-				Log.Info($"[SPOTIFYDEBUG] Adding ${listId}:${resource.ResourceTitle}");
 				addResult = MainCommands.ListAddItem(playlistManager, execInfo, listId, resource);
 			} catch (CommandException e) {
 				return new LocalStr(e.Message);
