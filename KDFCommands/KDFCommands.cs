@@ -626,7 +626,9 @@ namespace KDFCommands {
 			}
 
 			if (!addResult.Ok) {
-				return $"Error occured for '{resource.ResourceTitle}': Already contained in the playlist.";
+				return new LocalStr(
+					$"'{resource.ResourceTitle}' is already contained in the playlist."
+				);
 			}
 
 			return $"Added '{resource.ResourceTitle}' to playlist '{listId}' at position {addResult.Value}.";
